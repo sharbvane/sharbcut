@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="frameGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#111827"/>
+      <stop offset="100%" stop-color="#1f2937"/>
+    </linearGradient>
+    <linearGradient id="blueGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2563eb"/>
+      <stop offset="100%" stop-color="#0057ff"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Everything is grouped and fully editable -->
+  <g id="logo" transform="translate(512 512) rotate(-11) translate(-512 -512)">
+
+    <!-- Motion trail / rear frames -->
+    <g id="trail-2" opacity="0.18">
+      <rect x="300" y="350" width="360" height="250" rx="2"
+            fill="none" stroke="#bcd0e8" stroke-width="34"/>
+    </g>
+
+    <g id="trail-1" opacity="0.38">
+      <rect x="345" y="330" width="360" height="250" rx="2"
+            fill="none" stroke="#aebfd3" stroke-width="34"/>
+    </g>
+
+    <!-- Main frame -->
+    <rect id="main-frame" x="390" y="310" width="360" height="250" rx="2"
+          fill="#ffffff" stroke="url(#frameGrad)" stroke-width="34"/>
+
+    <!-- Bars -->
+    <rect id="bar-1" x="430" y="350" width="52" height="170" rx="3" fill="#eef2f7"/>
+    <rect id="bar-2" x="505" y="350" width="52" height="170" rx="3" fill="#b8c3d1"/>
+    <rect id="bar-3" x="580" y="350" width="52" height="170" rx="3" fill="#8797ab"/>
+    <rect id="bar-4" x="655" y="350" width="52" height="170" rx="3" fill="url(#blueGrad)"/>
+
+  </g>
+</svg>

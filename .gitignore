@@ -7,6 +7,9 @@ target/
 **/target/
 *.pdb
 
+# Project-local toolchains and caches.
+/.tools/
+
 # Nix build output
 /result
 /result-*
