@@ -44,17 +44,14 @@ export global Theme {
 
     // ── type ─────────────────────────────────────────────────────────────
     //
-    // Two roles, not one, even while one face plays both.
+    // Two type roles with bundled faces.
     //
     // `font` carries the interface: every label, title and sentence. `font-
     // technical` is for timecode, the ruler, clip labels, paths, dimensions,
     // counts — anything you read as a *value* rather than as language.
     //
-    // Both are Helvetica Neue. Synonym, a text face drawn for paragraph
-    // sizes, is bundled beside it (app.slint) and takes the interface back
-    // by changing the one name below; the split between the roles stays so
-    // that the two can differ again without touching a single element.
-    out property <string> font: "Helvetica Neue";
+    // Synonym carries interface labels; Helvetica Neue carries frame values.
+    out property <string> font: "Synonym";
     out property <string> font-technical: "Helvetica Neue";
     /// The scale. `fs` is the body size everything inherits; the two either
     /// side of it are the dense readout and the panel title. `xl` is for the
@@ -90,9 +87,9 @@ export global Theme {
     //
     // radii
     out property <length> r-xs: 3px;
-    out property <length> r-sm: 5px;
-    out property <length> r: 7px;
-    out property <length> r-lg: 12px;
+    out property <length> r-sm: 6px;
+    out property <length> r: 8px;
+    out property <length> r-lg: 10px;
     /// The dialog sheet, and nothing smaller. A modal is the largest rounded
     /// thing in the window and wants a corner to match.
     out property <length> r-xl: 16px;
@@ -102,6 +99,16 @@ export global Theme {
     out property <length> gap: 6px;
     out property <length> pad: 14px;      // panel horizontal padding
     out property <length> label-w: 62px;
+
+    // SharbCut shell metrics. Dense editing controls keep the existing 28px grid.
+    out property <length> titlebar-height: 52px;
+    out property <length> header-height: 44px;
+    out property <length> space-sm: 4px;
+    out property <length> space: 8px;
+    out property <length> space-lg: 16px;
+    out property <float> disabled-opacity: 0.45;
+    out property <color> accent-ink: dark ? #8cafff : #1d4ed8;
+    out property <color> shadow: dark ? #00000066 : #0f172a26;
 
     // ── surfaces ─────────────────────────────────────────────────────────
     out property <color> panel: dark ? Dark.panel : Light.panel;

@@ -148,7 +148,7 @@ pub fn run() -> Result<(), slint::PlatformError> {
     app.set_start_resolutions(ModelRc::from(Rc::new(VecModel::from(
         RESOLUTIONS
             .iter()
-            .map(|(label, _, _)| SharedString::from(*label))
+            .map(|(label, _, _)| SharedString::from(i18n::t(label)))
             .collect::<Vec<_>>(),
     ))));
     app.set_start_rates(ModelRc::from(Rc::new(VecModel::from(

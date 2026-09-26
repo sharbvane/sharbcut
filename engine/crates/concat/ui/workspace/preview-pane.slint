@@ -693,7 +693,7 @@ export component PreviewPane inherits Rectangle {
             background: Theme.well;
             clip: true;
 
-            property <length> pad: 16px;
+            property <length> pad: 18px;
             property <length> room-w: Math.max(1px, self.width - 2 * self.pad);
             property <length> room-h: Math.max(1px, self.height - 2 * self.pad);
             /// Always fitted, on whichever axis runs out first. The picker in
@@ -776,7 +776,7 @@ export component PreviewPane inherits Rectangle {
 
         // ── the transport ────────────────────────────────────────────────
         Rectangle {
-            height: 46px;
+            height: 52px;
             background: Theme.panel;
 
             Rectangle {

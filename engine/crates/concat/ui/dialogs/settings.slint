@@ -553,7 +553,7 @@ export component SettingsDialog inherits Modal {
                     title: I18n.t("About");
 
                     Text {
-                        text: I18n.t1("Concat {0}", "\{root.data.version}");
+                        text: "SharbCut " + root.data.version;
                         color: Theme.fg;
                         font-size: Theme.fs-lg;
                         font-weight: Theme.weight-title;

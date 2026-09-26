@@ -3,7 +3,7 @@
 
 import { I18n } from "../i18n.slint";
 import { Theme, Fmt, Glyph, Icon, Payload } from "../primitives/primitives.slint";
-import { Pane, PaneScroll } from "pane.slint";
+import { Pane, PaneHeader, PaneScroll } from "pane.slint";
 import { HairlineSplitter } from "splitter.slint";
 import { PaneKind, PaneSwitcher } from "pane-switcher.slint";
 import { TextAlignment } from "../timeline/model.slint";
@@ -70,6 +70,7 @@ export struct MediaItemData {
 
 component LibraryTab inherits Rectangle {
     in property <string> label;
+    in property <Glyph> glyph;
     in property <bool> current;
 
     callback clicked();
@@ -78,29 +79,47 @@ component LibraryTab inherits Rectangle {
     // shared, so "Transitions" is never crammed to make room for padding
     // around "Text". A Slint layout distributes spare width on top of each
     // child's own preferred width, which is the same rule.
-    horizontal-stretch: 1;
+    width: 76px;
+    height: 58px;
     border-radius: Theme.r-sm;
     // The current page is a chip lifted out of the track. Slint has no
     // box-shadow, so the value step carries the lift alone — which is why this
     // is `field` and not the lighter `field-hover`, whose job is to answer the
     // pointer.
-    background: root.current ? Theme.field : Colors.transparent;
+    background: root.current ? Theme.accent-soft
+        : touch.has-hover ? Theme.field : Colors.transparent;
 
     animate background { duration: 120ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
 
-    HorizontalLayout {
-        padding-left: 6px;
-        padding-right: 6px;
+    if root.current: Rectangle {
+        width: 2px;
+        height: 30px;
+        y: (parent.height - self.height) / 2;
+        background: Theme.accent;
+    }
+
+    VerticalLayout {
+        padding-top: 7px;
+        padding-bottom: 6px;
+        spacing: 3px;
+        alignment: center;
+
+        HorizontalLayout {
+            alignment: center;
+            Icon {
+                glyph: root.glyph;
+                size: 18px;
+                tint: root.current ? Theme.accent-ink : Theme.fg-muted;
+            }
+        }
 
         Text {
             text: root.label;
-            color: (root.current || touch.has-hover) ? Theme.fg : Theme.fg-muted;
-            font-size: Theme.fs-sm;
+            color: root.current ? Theme.fg : Theme.fg-muted;
+            font-size: Theme.fs-xs;
             horizontal-alignment: center;
             vertical-alignment: center;
             overflow: elide;
-
-            animate color { duration: 140ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
         }
     }
 
@@ -1304,6 +1323,7 @@ export component MediaPane inherits Rectangle {
     callback pane-removed();
 
     property <int> tab;
+    property <length> rail-w: 84px;
     property <bool> categories-open: true;
     property <bool> text-open: true;
     /// 0 = Titles, 1 = Presets
@@ -1412,18 +1432,18 @@ export component MediaPane inherits Rectangle {
     // rendered preview, each effect's real FFmpeg chain run over one source
     // still.
     property <[CatalogueItemData]> transitions-basic: [
-        { id: "cross-fade", label: "Cross Fade", enabled: true, glyph: Glyph.transition },
-        { id: "fade-black", label: "Fade to Black", enabled: true, glyph: Glyph.transition },
-        { id: "fade-white", label: "Fade to White", enabled: true, glyph: Glyph.transition },
+        { id: "cross-fade", label: I18n.t("Cross Fade"), enabled: true, glyph: Glyph.transition },
+        { id: "fade-black", label: I18n.t("Fade to Black"), enabled: true, glyph: Glyph.transition },
+        { id: "fade-white", label: I18n.t("Fade to White"), enabled: true, glyph: Glyph.transition },
     ];
     // The engine resolves these in concat-export's `resolve_transitions`:
     // the slides and the zoom as animation keys the monitor plays too, the
     // wipes as a mask the export bakes and the monitor shows as a dissolve.
     property <[CatalogueItemData]> transitions-motion: [
-        { id: "wipe-left", label: "Wipe Left", enabled: true, glyph: Glyph.transition },
-        { id: "wipe-right", label: "Wipe Right", enabled: true, glyph: Glyph.transition },
-        { id: "push", label: "Push", enabled: true, glyph: Glyph.transition },
-        { id: "zoom", label: "Zoom", enabled: true, glyph: Glyph.transition },
+        { id: "wipe-left", label: I18n.t("Wipe Left"), enabled: true, glyph: Glyph.transition },
+        { id: "wipe-right", label: I18n.t("Wipe Right"), enabled: true, glyph: Glyph.transition },
+        { id: "push", label: I18n.t("Push"), enabled: true, glyph: Glyph.transition },
+        { id: "zoom", label: I18n.t("Zoom"), enabled: true, glyph: Glyph.transition },
     ];
 
     function narrow(to: MediaFilter) {
@@ -1431,84 +1451,52 @@ export component MediaPane inherits Rectangle {
         root.filter-changed(to);
     }
 
+    Rectangle {
+        x: 0;
+        y: 0;
+        width: root.rail-w;
+        height: root.height;
+        background: Theme.panel;
+        border-width: 1px;
+        border-color: Theme.line;
+        border-radius: Theme.r-lg;
+        clip: true;
+
+        PaneScroll {
+            VerticalLayout {
+                padding-top: 8px;
+                padding-left: 4px;
+                spacing: 3px;
+                alignment: start;
+                LibraryTab { label: I18n.t("Media"); glyph: Glyph.film; current: root.tab == 0; clicked => { root.tab = 0; } }
+                LibraryTab { label: I18n.t("Text"); glyph: Glyph.text-mark; current: root.tab == 1; clicked => { root.tab = 1; } }
+                LibraryTab { label: I18n.t("Transitions"); glyph: Glyph.transition; current: root.tab == 2; clicked => { root.tab = 2; } }
+                LibraryTab { label: I18n.t("Effects"); glyph: Glyph.sparkle; current: root.tab == 3; clicked => { root.tab = 3; } }
+                LibraryTab { label: I18n.t("Filters"); glyph: Glyph.filter; current: root.tab == 4; clicked => { root.tab = 4; } }
+                LibraryTab { label: I18n.t("Templates"); glyph: Glyph.frame; current: root.tab == 5; clicked => { root.tab = 5; } }
+            }
+        }
+    }
+
     Pane {
+        x: root.rail-w + 8px;
+        width: Math.max(0px, root.width - root.rail-w - 8px);
+        height: root.height;
         // The page strip. Its bottom edge is the pane's full-width divider,
         // which is why the hairline is a child of this row and not a border on
         // the pill below it.
-        Rectangle {
-            height: 44px;
-
-            Rectangle {
-                y: parent.height - 1px;
-                height: 1px;
-                background: Theme.line;
-            }
-
-            HorizontalLayout {
-                padding: 8px;
-                spacing: 8px;
-
-                // A sunken track and nothing else. No border: this sits
-                // inside a pane that is already outlined, and a second rule
-                // 8px in from the first reads as a box in a box. That is what
-                // separates it from `SegmentedControl`, where the border is
-                // doing real work because that control sits loose in a form
-                // row with nothing else to bound it.
-                Rectangle {
-                    background: Theme.well;
-                    border-radius: Theme.r;
-
-                    HorizontalLayout {
-                        padding: 2px;
-                        spacing: 2px;
-
-                        LibraryTab {
-                            label: I18n.t("Media");
-                            current: root.tab == 0;
-                            clicked => { root.tab = 0; }
-                        }
-                        LibraryTab {
-                            label: I18n.t("Text");
-                            current: root.tab == 1;
-                            clicked => { root.tab = 1; }
-                        }
-                        LibraryTab {
-                            label: I18n.t("Transitions");
-                            current: root.tab == 2;
-                            clicked => { root.tab = 2; }
-                        }
-                        LibraryTab {
-                            label: I18n.t("Effects");
-                            current: root.tab == 3;
-                            clicked => { root.tab = 3; }
-                        }
-                        LibraryTab {
-                            label: I18n.t("Filters");
-                            current: root.tab == 4;
-                            clicked => { root.tab = 4; }
-                        }
-                        LibraryTab {
-                            label: I18n.t("Templates");
-                            current: root.tab == 5;
-                            clicked => { root.tab = 5; }
-                        }
-                    }
-                }
-
-                // Outside the sunken track, not in it: the track holds the
-                // pages of *this* view and this button changes which view the
-                // pane is, which is a different question about a different
-                // thing.
-                VerticalLayout {
-                    alignment: center;
-                    PaneSwitcher {
-                        kind: PaneKind.media;
-                        seat: root.pane-seat;
-                        removable: root.pane-removable;
-                        picked(kind) => { root.pane-picked(kind); }
-                        removed => { root.pane-removed(); }
-                    }
-                }
+        PaneHeader {
+            title: root.tab == 0 ? I18n.t("Media")
+                : root.tab == 1 ? I18n.t("Text")
+                : root.tab == 2 ? I18n.t("Transitions")
+                : root.tab == 3 ? I18n.t("Effects")
+                : root.tab == 4 ? I18n.t("Filters") : I18n.t("Templates");
+            PaneSwitcher {
+                kind: PaneKind.media;
+                seat: root.pane-seat;
+                removable: root.pane-removable;
+                picked(kind) => { root.pane-picked(kind); }
+                removed => { root.pane-removed(); }
             }
         }
 
@@ -1792,7 +1780,7 @@ export component MediaPane inherits Rectangle {
 
                             Text {
                                 horizontal-stretch: 1;
-                                text: "\{root.selected-count} selected";
+                                text: I18n.t1("{0} selected", "\{root.selected-count}");
                                 color: Theme.fg-muted;
                                 font-size: Theme.fs-sm;
                                 vertical-alignment: center;
@@ -1830,7 +1818,7 @@ export component MediaPane inherits Rectangle {
                     glyph: Glyph.import;
                     text: root.count-all > 0
                         ? I18n.t("Nothing of that kind in this project.")
-                        : "Drop video and audio files anywhere in the window to import them.";
+                        : I18n.t("Drop video and audio files anywhere in the window to import them.");
                 }
 
                 if root.tab == 0 && root.items.length > 0: HorizontalLayout {

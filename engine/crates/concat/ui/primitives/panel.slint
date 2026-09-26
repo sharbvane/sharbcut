@@ -206,19 +206,14 @@ export component IconButton inherits Rectangle {
     callback clicked();
 
     property <bool> lit: touch.has-hover && root.enabled;
-    // Checked is a lime *glyph* on a darker chip, never dark ink on a lime
-    // slab and not a lime-tinted one either: an activated tool button is a
-    // lime glyph on a slightly darker surface, so the toolbar reads as "this
-    // mode is on" without shouting. With the accent itself lime, even a 20%
-    // tint behind eight of them turns a tray into a row of green slabs. The
-    // glyph carries the state; the chip only has to sit back far enough to be
-    // seen behind it.
-    property <brush> tint: root.checked ? Theme.accent
+    // Checked tools use readable blue ink on a quiet wash. The transport's
+    // single primary action instead fills its chip with brand blue.
+    property <brush> tint: root.checked ? Theme.accent-ink
         : (root.lit && root.danger) ? Theme.danger
-        : root.accent ? (root.lit ? Theme.accent-hover : Theme.accent)
+        : root.accent ? Theme.on-accent
         : root.lit ? Theme.fg
         : Theme.fg-muted;
-    property <length> side: 26px;
+    property <length> side: root.accent ? 32px : 26px;
     property <bool> ring;
 
     // Fixed across, free along. A Slint layout start-aligns a fixed-size child
@@ -255,12 +250,12 @@ export component IconButton inherits Rectangle {
         y: (root.height - root.side) / 2;
         width: root.width;
         height: root.side;
-        border-radius: Theme.r-sm;
-        opacity: root.enabled ? 1.0 : 0.4;
-        background: root.checked ? Theme.well
+        border-radius: root.accent ? Theme.r : Theme.r-sm;
+        opacity: root.enabled ? 1.0 : Theme.disabled-opacity;
+        background: root.checked ? Theme.accent-soft
             : !root.enabled ? Colors.transparent
+            : root.accent ? (touch.has-hover ? Theme.accent-hover : Theme.accent)
             : (touch.has-hover && root.danger) ? Theme.danger-soft
-            : (touch.has-hover && root.accent) ? Theme.accent-soft
             : touch.pressed ? Theme.field-active
             : touch.has-hover ? Theme.field
             : Colors.transparent;

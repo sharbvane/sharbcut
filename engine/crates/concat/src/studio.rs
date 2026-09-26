@@ -1315,7 +1315,8 @@ impl Studio {
         let prefs = Preferences::load(&host.dirs);
         // The words first, so everything published from here on is in
         // the remembered language.
-        i18n::select(prefs.locale.as_deref().unwrap_or(i18n::ENGLISH), &host.dirs);
+        let locale = prefs.locale.as_deref().unwrap_or("zh-Hans").to_owned();
+        i18n::select(&locale, &host.dirs);
         let languages = i18n::languages(&host.dirs);
         let recents = projects::list(&host.dirs.config);
         let text_presets = presets::all(&host.dirs);
@@ -1401,7 +1402,7 @@ impl Studio {
         studio.settings.language = studio
             .languages
             .iter()
-            .position(|language| Some(language.code.as_str()) == studio.prefs.locale.as_deref())
+            .position(|language| language.code == locale)
             .unwrap_or(0);
         studio.settings.playhead_stops = studio.prefs.playhead_stops_at_end;
         studio.refresh_models();
@@ -6316,12 +6317,7 @@ impl Studio {
         app.set_on_start(self.on_start);
         app.set_project_name(self.project_name.as_str().into());
         app.set_project_status(
-            if self.dirty {
-                "unsaved changes"
-            } else {
-                "saved"
-            }
-            .into(),
+            if self.dirty { t("unsaved changes") } else { t("saved") }.into(),
         );
         app.set_toast(ToastData {
             token: self.toast.token,

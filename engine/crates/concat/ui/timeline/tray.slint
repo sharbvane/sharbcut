@@ -13,7 +13,7 @@ import { TimelineTool } from "model.slint";
 // The tool set: add-track first, then pointer and razor, then the three
 // edit actions, then snapping, then the tools a clip's sound and words need
 // - captions, a spoken title, detaching the sound - and the view controls
-// pushed to the far end behind the timecode readout. The metrics: 40px
+// pushed to the far end behind the timecode readout. The metrics: 44px
 // tall, 4px between buttons, an 18px hairline with 4px of air on each side
 // between groups. Tight, without crowding a 26px button.
 //
@@ -53,7 +53,7 @@ component TrayTool inherits Rectangle {
         width: root.width;
         height: 26px;
         border-radius: Theme.r-sm;
-        opacity: root.enabled ? 1.0 : 0.4;
+        opacity: root.enabled ? 1.0 : Theme.disabled-opacity;
         background: !root.enabled ? Colors.transparent
             : touch.pressed ? Theme.field-active
             : touch.has-hover ? Theme.field
@@ -136,7 +136,7 @@ export component TimelineTray inherits Rectangle {
     callback fit();
     callback zoom(factor: float);
 
-    height: 40px;
+    height: 44px;
     background: Theme.panel;
 
     Rectangle {

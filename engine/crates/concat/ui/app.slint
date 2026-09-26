@@ -59,7 +59,8 @@ export {
 }
 
 export component App inherits Window {
-    title: "Concat";
+    title: "SharbCut";
+    no-frame: true;
     background: Theme.page;
     default-font-family: Theme.font;
     default-font-size: Theme.fs;
@@ -379,7 +380,7 @@ export component App inherits Window {
                 menu-opened(index, at-x) => {
                     appmenu.request-x = at-x;
                     // Under the strip, which is 32px tall.
-                    appmenu.request-y = 32px;
+                appmenu.request-y = Theme.titlebar-height;
                     root.menu-opened(index);
                 }
 

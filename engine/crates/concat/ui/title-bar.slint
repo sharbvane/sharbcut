@@ -138,8 +138,8 @@ export component TitleBar inherits Rectangle {
     callback add-pane(kind: PaneKind);
     callback export-clicked();
 
-    height: 32px;
-    background: Theme.panel;
+    height: Theme.titlebar-height;
+    background: Theme.page;
 
     // Whatever is not a control drags the window. Declared first so every
     // control sits above it and takes its own presses; Texts and plain
@@ -169,7 +169,7 @@ export component TitleBar inherits Rectangle {
         y: 0;
         width: parent.width;
         height: parent.height;
-        padding-left: root.macos ? 80px : 8px;
+        padding-left: root.macos ? 80px : 16px;
         // No right padding when the strip ends in its own buttons: the close
         // button belongs in the corner, not eight pixels shy of it.
         padding-right: root.own-buttons ? 0px : 8px;
@@ -179,9 +179,10 @@ export component TitleBar inherits Rectangle {
         VerticalLayout {
             alignment: center;
             Image {
-                width: 16px;
-                height: 16px;
-                source: @image-url("assets/concat-logo.png");
+                width: 34px;
+                height: 30px;
+                source: @image-url("assets/sharbcut-mark.svg");
+                image-fit: contain;
             }
         }
 
@@ -190,9 +191,9 @@ export component TitleBar inherits Rectangle {
             padding-left: 6px;
             padding-right: 6px;
             Text {
-                text: "Concat";
+                text: "SharbCut";
                 color: Theme.fg;
-                font-size: Theme.fs-lg;
+                font-size: 18px;
                 font-weight: Theme.weight-display;
             }
         }
@@ -257,7 +258,7 @@ export component TitleBar inherits Rectangle {
 
             export-button := Rectangle {
                 width: label.width + icon.width + 26px;
-                height: 24px;
+                height: 32px;
                 border-radius: Theme.r-sm;
                 background: export-touch.has-hover ? Theme.accent-hover : Theme.accent;
 
@@ -313,10 +314,10 @@ export component TitleBar inherits Rectangle {
     // laid out, so it stays centred in the window and not in whatever space
     // the menus leave over.
     centre := HorizontalLayout {
-        visible: !root.minimal;
-        x: (parent.width - self.preferred-width) / 2;
+        visible: !root.minimal && root.width >= 1100px;
+        x: (parent.width - self.width) / 2;
         y: 0;
-        width: self.preferred-width;
+        width: Math.min(280px, root.width - 820px);
         height: parent.height;
         spacing: 6px;
 
@@ -324,6 +325,7 @@ export component TitleBar inherits Rectangle {
             alignment: center;
             Text {
                 text: root.project-name;
+                overflow: elide;
                 color: Theme.fg-muted;
                 font-size: Theme.fs;
             }

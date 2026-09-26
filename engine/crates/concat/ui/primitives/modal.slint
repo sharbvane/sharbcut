@@ -54,6 +54,9 @@ export component Modal inherits Rectangle {
         border-width: 1px;
         border-color: Theme.line-strong;
         border-radius: Theme.r-xl;
+        drop-shadow-blur: 24px;
+        drop-shadow-offset-y: 8px;
+        drop-shadow-color: Theme.shadow;
         clip: true;
 
         // Swallows presses that land on the dialog, so they do not reach the
@@ -190,7 +193,7 @@ export component Button inherits Rectangle {
     min-width: root.block ? 0px
         : text.preferred-width + root.mark + root.gap + (root.large ? 32px : 24px);
     border-radius: Theme.r;
-    opacity: root.enabled ? 1.0 : 0.45;
+    opacity: root.enabled ? 1.0 : Theme.disabled-opacity;
     border-width: root.ghost ? 0px : 1px;
     border-color: root.primary ? (root.lit ? Theme.accent-hover : Theme.accent)
         : (root.danger && root.lit) ? root.danger-edge
@@ -483,7 +486,7 @@ export component Field inherits Rectangle {
         : touch.has-hover ? Theme.field-hover
         : Theme.field;
     border-width: 1px;
-    border-color: input.has-focus ? Theme.accent : Colors.transparent;
+    border-color: input.has-focus ? Theme.accent : Theme.line;
     clip: true;
 
     animate background, border-color { duration: 100ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
