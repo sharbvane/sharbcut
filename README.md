@@ -1,110 +1,44 @@
-<div align="center">
-<table width="100%">
-  <tr>
-    <td align="left" width="120">
-      <img src="https://cdn.jsdelivr.net/gh/jub0t/Concat@main/assets/logo-dark.png" alt="Concat" width="100" />
-    </td>
-    <td align="right">
-      <h1>Concat</h1>
-      <h3 style="margin-top: -10px;">The truly free, and open-source cross-platform CapCut replacement.</h3>
-    </td>
-  </tr>
-</table>
+# SharbCut
 
-<p align="center">
-  <a href="https://github.com/jub0t/Concat/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/jub0t/Concat/ci.yml?style=flat&logo=githubactions&logoColor=F8F8F8&label=Build&labelColor=000000" alt="Build Status" /></a>
-  <a href="https://github.com/jub0t/Concat/releases"><img src="https://img.shields.io/github/downloads/jub0t/concat/total?style=flat&logo=github&logoColor=F8F8F8&label=Downloads&labelColor=000000&color=c6f432" alt="Total Downloads" /></a>
-  <a href="https://github.com/jub0t/Concat/releases"><img src="https://img.shields.io/badge/Version-0.2.1-c6f432?style=flat&logo=semver&logoColor=F8F8F8&labelColor=000000" alt="Concat Version 0.2.1" /></a>
-  <a href="https://discord.gg/DVuPfpXfqP"><img src="https://img.shields.io/badge/Discord-Join%20the%20server-5865F2?style=flat&logo=discord&logoColor=F8F8F8&labelColor=000000" alt="Join Concat Discord" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-c6f432?style=flat&logo=gnu&logoColor=F8F8F8&labelColor=000000" alt="License: AGPL-3.0-or-later" /></a>
-</p>
+SharbCut 是基于 [Concat](https://github.com/jub0t/Concat) 开发的 Windows 桌面视频编辑器。普通剪辑、BGM 自动卡点和 AI 剪辑都作用于同一条可编辑时间线；生成的镜头保留对原素材的引用，可以继续手动修改、撤销和重做。
 
-<img src="https://cdn.jsdelivr.net/gh/jub0t/Concat@main/assets/editor.png" alt="Concat editor" width="100%" />
+当前为测试版本。项目保留原 Concat 的多轨时间线、预览、字幕、转场、效果与导出功能；新增的 AI Agent 和 BGM-Montage 不需要单独导入渲染好的成片。
 
-</div>
+## 安装与使用
 
----
+- Windows x64 安装包：`release/SharbCutSetup.exe`。安装包已包含应用、FFmpeg、BGM-Montage 所需的 Python 运行时和依赖；使用者不需要安装 Rust、Cargo、CMake 或 FFmpeg。
+- 便携版：解压 `release/SharbCut-Windows-x64.zip`，运行其中的 `SharbCut.exe`。便携包的 `portable` 文件夹保存本机设置与下载的模型。
+- 新建项目并导入视频、音频后，可以像普通编辑器一样手动剪辑和导出。原素材需保持在原位置，项目时间线引用这些文件，并不复制全部媒体。
 
-Concat is everything you use CapCut for. No watermarks. No paywalls. No subscriptions.
+### BGM 自动卡点
 
-It runs entirely on your machine, powered by a native Rust engine. Install it and start cutting. No account, no setup.
+在媒体区选择 BGM 和素材，使用“自动卡点”。默认模式是 **BMTS-lite**，适合日常快速生成；“完整模式”是可选的高级分析流程，通常更慢。两种模式都应将源素材片段和 BGM 直接放进当前可编辑时间线，并允许撤销、重做。也可以使用“导入卡点时间线”导入兼容的 `edit_decisions.json`。
 
-## Highlights
+### AI 剪辑
 
-- 🚫 **No watermarks.** No account. No paywall.
-- 🔒 **100% local.** Nothing leaves your machine.
-- 🎬 **Multi-track editing.** Several timelines per project.
-- ✂️ **Cut fast.** Split, trim, merge, transitions, speed control.
-- 💬 **Auto-captions.** Runs on your machine, offline.
-- 🗣️ **Text-to-Speech.** Free, local voices.
-- 🎙️ **Voice filters.** Clean up or play with your sound.
-- 📝 **Titles and styled text.**
-- 📦 **Templates.** Build an edit once, reuse it.
-- 🖥️ **macOS, Windows and Linux.** Same app everywhere.
-- 🌍 **Twelve languages.** Add one with a single JSON file, see [TRANSLATING.md](TRANSLATING.md).
+打开顶部“AI 剪辑”，填写兼容 OpenAI Chat Completions 的 Base URL、模型及 API Key，然后用中文描述对当前项目的修改，例如“把第一段改成 1.5 倍速”或“用已导入的 BGM 自动卡点”。AI 返回的操作经过命令白名单和项目校验，再作为可撤销的编辑应用到当前时间线。API Key 保存在 Windows 凭据管理器，不写入项目文件。
 
-## Get started
+**数据边界：** 发起 AI 剪辑请求时，应用会向你配置的模型服务发送项目/时间线元数据、素材路径与名称，以及最多 4 帧低分辨率预览；选中素材时可能附带音量摘要和已安装转写模型产生的短对白。若 Base URL 指向外部服务，这些数据会离开本机。普通本地剪辑和 BGM 自动卡点不需要 AI 服务。请自行确认所用模型服务及素材的隐私要求。
 
-Concat is currently in **Beta version (pre-release)**. **Download** the latest build from [Releases](https://github.com/jub0t/Concat/releases).
+## 开发
 
-**Portable:** the Windows and Linux builds are plain archives. To keep everything on the stick or in the folder you unpacked into, make a folder named `portable` beside the `concat` executable: settings, recents and downloaded models then live there and nothing is written to the user profile.
+在 Windows x64、MSVC 构建环境中运行：
 
-**Platform support:**
+```powershell
+.\scripts\setup-dev.ps1
+Set-Location .\engine
+cargo check -p concat --locked
+cargo build -p concat --locked
+Set-Location ..
+.\scripts\run-dev.ps1 -SkipBuild
+```
 
-- ✅ **Windows** — tested
-- ✅ **macOS** — unsigned binaries; run:
-  `xattr -dr com.apple.quarantine /Applications/Concat.app`
-- ✅ **Linux**
-  - 🧪 ARM
-  - 🧪 x86_64
-- 🧪 **Android**
-  - Phones
-  - Tablets
-- 🧪 **iOS / iPadOS**
-  - iPhone
-  - iPad
+首次运行 `setup-dev.ps1` 会在项目的 `.tools` / `vendor` 中准备可项目级存放的工具和依赖；MSVC / Windows SDK 等系统组件仍需正常安装。日常验证使用 BMTS-lite 和小规模真实素材，不运行完整模式。生成 Windows 发布包：
 
-**Status:** ✅ Supported · 🚧 Work in progress · 🧪 To be tested
+```powershell
+.\scripts\package-windows.ps1
+```
 
-**System requirements:**
+## 来源与许可
 
-Concat runs everything on your machine, so the hardware sets the ceiling. The minimum column is what a build will run on at all; the recommended column is what makes 1080p editing feel smooth and keeps 4K exports and captions from being a wait.
-
-| | Minimum | Recommended |
-|---|---|---|
-| **CPU** | Any 64-bit processor from 2013 or later | 6 cores or more |
-| **GPU** | None. Without a usable GPU the window and monitor fall back to the CPU | Any GPU with Metal (macOS), DirectX 12 (Windows) or Vulkan (Linux) |
-| **RAM** | **4 GB** | **16 GB** for 4K timelines and the larger caption models |
-| **Storage** | **500 MB** for the app and the smallest caption model | **2 GB** for every optional model, plus room for projects and exports |
-
-Optional models download from the settings panel on first use and then never need the network again: auto-captions 78 MB to 488 MB depending on the whisper size you pick, text-to-speech 132 MB or 349 MB, person cutout 15 MB, object cutout 179 MB, and the cutout brush 40 MB.
-
-## Contribution
-
-> [!IMPORTANT]
-> The best way to contribute is to grab a build from the [Release](https://github.com/jub0t/Concat/releases) page and test the application to see where it breaks or how it can be improved.
-
-Ready to write code? [CONTRIBUTING.md](./CONTRIBUTING.md) covers setup, layout, the checks to run, and how contributions are licensed. There is also [this Discussion announcement](https://github.com/jub0t/Concat/discussions/3). Read [ROADMAP.MD](./ROADMAP.MD) for future goals.
-
-## Concat vs CapCut vs OpenCut
-
-🟢 strong · 🟡 partial or with strings attached · 🔴 weak or missing
-
-| | Concat | CapCut | OpenCut | Notes |
-|---|:---:|:---:|:---:|---|
-| Performance | 🟢 | 🟢 | 🟡 | Concat and CapCut are native. OpenCut runs on WebAssembly FFmpeg in a browser |
-| Price | 🟢 | 🟡 | 🟢 | CapCut is free until Pro effects, 4K or AI tools, then $9.99 to $19.99 a month |
-| Watermark | 🟢 | 🟡 | 🟢 | CapCut stamps exports that use Pro assets |
-| Privacy | 🟢 | 🔴 | 🟢 | Concat sends nothing anywhere. CapCut's terms grant ByteDance a perpetual licence to uploads |
-| Offline | 🟢 | 🟡 | 🟡 | Concat's captions, speech, cutout and export all run on device. CapCut's best features are cloud |
-| Open source | 🟢 | 🔴 | 🟢 | Concat AGPL, OpenCut MIT, CapCut closed |
-| 4K export | 🟢 | 🟡 | 🟡 | CapCut caps free at 1080p. OpenCut depends on the browser |
-| Effects and templates | 🟡 | 🟢 | 🔴 | CapCut has thousands. Concat has a few dozen. OpenCut has a basic set |
-| AI tools | 🟡 | 🟢 | 🟡 | CapCut has tracking, reframe, avatars. Concat has local captions, speech and person cutout |
-| Keyframes | 🟡 | 🟢 | 🟡 | Concat keys position, scale, rotation and opacity with bezier easing. No curve editor and no keyed effect parameters yet |
-| Export formats | 🟡 | 🟢 | 🟡 | Concat writes H.264 MP4 only. OpenCut MP4 and WebM |
-| Stability | 🟡 | 🟢 | 🔴 | Concat is a 0.2.x beta. OpenCut is mid rewrite |
-| Mobile | 🟡 | 🟢 | 🔴 | Concat's Android and iOS builds compile but are untested. OpenCut's are in progress |
-| Extensibility | 🟡 | 🔴 | 🟢 | OpenCut ships an Editor API, MCP server and plugins. Concat's plugin API is planned |
-| Community | 🟡 | 🟢 | 🟢 | OpenCut has tens of thousands of stars. Concat has a Discord and a handful of contributors |
-| Multiple timelines per project | 🟢 | 🔴 | 🔴 | Concat only |
+SharbCut 基于 Concat；原项目的许可证及附加许可见 [LICENSE](LICENSE) 和 [LICENSE-EXCEPTIONS.md](LICENSE-EXCEPTIONS.md)。BGM-Montage、BMTS-lite、FFmpeg、Slint 等第三方组件及许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 与安装包中的相应许可文件。原 Concat 项目的开发文档仍保留在仓库中，部分页面尚使用原名称。

@@ -2,9 +2,10 @@
 
 ## FFmpeg
 
-Concat links FFmpeg's libraries - libavformat, libavcodec, libavfilter,
-libswscale and libswresample - through the `ffmpeg-the-third` crate. The
-Slint app spawns no `ffmpeg` or `ffprobe` process.
+The Concat editing engine links FFmpeg's libraries - libavformat, libavcodec,
+libavfilter, libswscale and libswresample - through the `ffmpeg-the-third`
+crate. SharbCut's bundled BGM-Montage runtime also invokes the packaged
+`ffmpeg` and `ffprobe` executables for automatic beat editing.
 
 FFmpeg is licensed under the LGPL-2.1-or-later; builds that include x264
 (which the H.264 export uses) are GPL-2.0-or-later. Concat's own sources are

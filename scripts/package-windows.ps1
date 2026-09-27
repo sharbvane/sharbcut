@@ -97,7 +97,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Packaged BGM Montage could not start.' }
 
 $notices = Join-Path $stage 'ThirdParty'
 New-Item -ItemType Directory -Force -Path $notices | Out-Null
-foreach ($name in @('LICENSE', 'LICENSE-EXCEPTIONS.md', 'THIRD_PARTY_NOTICES.md')) {
+foreach ($name in @('README.md', 'LICENSE', 'LICENSE-EXCEPTIONS.md', 'THIRD_PARTY_NOTICES.md')) {
     Copy-Item -LiteralPath (Join-Path $repoRoot $name) -Destination $stage
 }
 Copy-Item -LiteralPath (Join-Path $env:FFMPEG_DIR 'LICENSE.txt') -Destination (Join-Path $notices 'FFmpeg-LICENSE.txt')
