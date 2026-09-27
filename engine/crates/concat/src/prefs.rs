@@ -37,6 +37,7 @@ pub struct Preferences {
     /// OpenAI-compatible endpoint; the secret is kept in OS credentials.
     pub ai_base_url: Option<String>,
     pub ai_model: Option<String>,
+    pub ai_reasoning_effort: Option<String>,
 }
 
 #[cfg(windows)]

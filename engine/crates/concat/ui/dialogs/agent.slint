@@ -5,6 +5,7 @@ import { I18n } from "../i18n.slint";
 import { Theme } from "../theme/theme.slint";
 import { Glyph } from "../icons.slint";
 import { Button, DialogRow, Field, Modal } from "../primitives/modal.slint";
+import { Select } from "../primitives/select.slint";
 import { PaneScroll } from "../workspace/pane.slint";
 
 export struct AgentData {
@@ -14,6 +15,7 @@ export struct AgentData {
     prompt: string,
     base-url: string,
     model: string,
+    reasoning-effort: int,
     key-draft: string,
     key-saved: bool,
 }
@@ -24,6 +26,7 @@ export component AgentDialog inherits Modal {
     callback prompt-edited(text: string);
     callback base-url-edited(text: string);
     callback model-edited(text: string);
+    callback reasoning-effort-changed(index: int);
     callback key-edited(text: string);
     callback save-config();
     callback clear-key();
@@ -33,14 +36,14 @@ export component AgentDialog inherits Modal {
     title: I18n.t("AI 剪辑助手");
     glyph: Glyph.sparkle;
     surface-width: 700px;
-    surface-height: 600px;
+    surface-height: 640px;
 
     VerticalLayout {
         padding: 16px;
         spacing: 12px;
 
         Text {
-            text: I18n.t("直接编辑当前时间线，修改可撤销。项目元数据、最多 4 帧画面及选中片段的响度摘要会发送到你配置的模型服务。");
+            text: I18n.t("直接编辑当前时间线，修改可撤销。项目元数据、最多 4 帧画面、选中片段的响度摘要，以及已安装转写模型提供的前 15 秒对白，会发送到你配置的模型服务。转写模型可在设置中下载。");
             color: Theme.fg-dim;
             font-size: Theme.fs-sm;
             wrap: word-wrap;
@@ -112,6 +115,14 @@ export component AgentDialog inherits Modal {
                 technical: true;
                 placeholder: "model-name";
                 edited(text) => { root.model-edited(text); }
+            }
+        }
+        DialogRow {
+            label: I18n.t("推理强度");
+            Select {
+                options: [I18n.t("自动"), "none", "low", "medium", "high", "xhigh", "max"];
+                current: root.data.reasoning-effort;
+                changed(index) => { root.reasoning-effort-changed(index); }
             }
         }
         DialogRow {

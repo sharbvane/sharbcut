@@ -201,6 +201,7 @@ export component App inherits Window {
     callback agent-prompt-edited(text: string);
     callback agent-base-url-edited(text: string);
     callback agent-model-edited(text: string);
+    callback agent-reasoning-effort-changed(index: int);
     callback agent-key-edited(text: string);
     callback agent-save-config();
     callback agent-clear-key();
@@ -542,6 +543,7 @@ export component App inherits Window {
         prompt-edited(text) => { root.agent-prompt-edited(text); }
         base-url-edited(text) => { root.agent-base-url-edited(text); }
         model-edited(text) => { root.agent-model-edited(text); }
+        reasoning-effort-changed(index) => { root.agent-reasoning-effort-changed(index); }
         key-edited(text) => { root.agent-key-edited(text); }
         save-config => { root.agent-save-config(); }
         clear-key => { root.agent-clear-key(); }

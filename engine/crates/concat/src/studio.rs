@@ -285,9 +285,12 @@ pub struct AgentState {
     pub prompt: String,
     pub base_url: String,
     pub model: String,
+    pub reasoning_effort: i32,
     pub key_draft: String,
     pub key_saved: bool,
 }
+
+const AI_EFFORTS: [&str; 7] = ["", "none", "low", "medium", "high", "xhigh", "max"];
 
 /// The bottom-right notice: one at a time. The token is what the panel
 /// watches, bumped per notice so the same sentence said twice blinks twice.
@@ -1337,6 +1340,11 @@ impl Studio {
                 .clone()
                 .unwrap_or_else(|| "https://api.openai.com/v1".to_owned()),
             model: prefs.ai_model.clone().unwrap_or_default(),
+            reasoning_effort: prefs
+                .ai_reasoning_effort
+                .as_deref()
+                .and_then(|effort| AI_EFFORTS.iter().position(|value| *value == effort))
+                .unwrap_or(0) as i32,
             key_draft: String::new(),
             key_saved: crate::prefs::load_api_key().ok().flatten().is_some(),
         };
@@ -2311,6 +2319,10 @@ impl Studio {
     pub fn agent_save_config(&mut self) -> bool {
         self.prefs.ai_base_url = Some(self.agent.base_url.trim().to_owned());
         self.prefs.ai_model = Some(self.agent.model.trim().to_owned());
+        self.prefs.ai_reasoning_effort = AI_EFFORTS
+            .get(self.agent.reasoning_effort as usize)
+            .filter(|effort| !effort.is_empty())
+            .map(|effort| (*effort).to_owned());
         if !self.agent.key_draft.is_empty() {
             if let Err(error) = crate::prefs::save_api_key(&self.agent.key_draft) {
                 self.notify(&error, true);
@@ -2351,16 +2363,62 @@ impl Studio {
             base_url: self.agent.base_url.clone(),
             model: self.agent.model.clone(),
             api_key: key,
+            reasoning_effort: self.prefs.ai_reasoning_effort.clone(),
         };
         let project = session.project().clone();
         let selected = self.selection.clone();
+        let speech = self
+            .transcribers
+            .iter()
+            .find(|model| model.installed && model.active)
+            .and_then(|model| {
+                selected.iter().find_map(|id| {
+                    let clip = project.active().clips.iter().find(|clip| &clip.id == id)?;
+                    let media = project.media_by_id(&clip.media_id)?;
+                    (media.has_audio && !media.placeholder).then(|| {
+                        (
+                            clip.id.clone(),
+                            concat_speech::transcribe::TranscribeRequest {
+                                path: media.path.clone(),
+                                audio_stream: clip.audio_stream,
+                                source_start: clip.source_start,
+                                window: (clip.duration * clip.speed).min(15.0),
+                                model_id: model.id.clone(),
+                            },
+                        )
+                    })
+                })
+            });
+        let transcriber = Arc::clone(&self.host.transcriber);
+        let dirs = self.host.dirs.clone();
         let path = session.path().to_owned();
         let revision = self.revision;
         self.agent.transcript.push_str(&format!("你：{prompt}\n"));
         self.agent.prompt.clear();
         self.agent.busy = true;
         spawn(
-            move || agent::request(config, &context_prompt, &project, &selected),
+            move || {
+                let transcript = speech.and_then(|(id, request)| {
+                    let segments = transcriber.transcribe(&dirs, &request, |_| {}).ok()?;
+                    let text = segments
+                        .iter()
+                        .take(12)
+                        .map(|segment| {
+                            format!("{:.1}-{:.1}s {}", segment.start, segment.end, segment.text)
+                        })
+                        .collect::<Vec<_>>()
+                        .join("; ");
+                    (!text.is_empty())
+                        .then(|| format!("clip {id}, first {:.1}s: {text}", request.window))
+                });
+                agent::request(
+                    config,
+                    &context_prompt,
+                    &project,
+                    &selected,
+                    transcript.as_deref(),
+                )
+            },
             move |studio, _, _, result| {
                 studio.agent.busy = false;
                 match result {
@@ -6812,6 +6870,7 @@ impl Studio {
             prompt: self.agent.prompt.as_str().into(),
             base_url: self.agent.base_url.as_str().into(),
             model: self.agent.model.as_str().into(),
+            reasoning_effort: self.agent.reasoning_effort,
             key_draft: self.agent.key_draft.as_str().into(),
             key_saved: self.agent.key_saved,
         });

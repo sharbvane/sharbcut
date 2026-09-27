@@ -24,6 +24,8 @@ pub struct Config {
     pub model: String,
     /// Per-user secret, never stored in the project.
     pub api_key: String,
+    /// Optional Chat Completions reasoning effort; omitted for older endpoints.
+    pub reasoning_effort: Option<String>,
 }
 
 /// A checked model proposal, ready to apply as one undo step.
@@ -71,7 +73,7 @@ fn montage_duration() -> f64 {
     30.0
 }
 
-const SYSTEM: &str = r#"You are SharbCut's timeline editing assistant. Reply with ONE JSON object only: {"reply":"short Chinese explanation","commands":[...]}. Commands are SharbCut's existing camelCase command format. Allowed ops: removeClips {clipIds}, splitClips {clipIds,time}, trimClip {clipId,edge:"start"|"end",delta}, moveClips {moves:[{clipId,start,trackId}]}, setClipSpeed {clipId,speed}, updateClip {clipId,patch:{volume?,fadeIn?,fadeOut?,transitionIn?}}, addClipSegment {mediaPath,trackId?,start,sourceStart,duration,speed,patch:{}}, addTextClip {trackId?,start,duration,style:{content}}. Use ONLY ids and media paths from the provided project. Times are seconds. To make a rough cut, remove existing clips and add source-backed segments in one response. To place a BGM already in the bin, use addClipSegment on its path, with an audio track. For a request to automatically cut footage to a BGM, return {"reply":"将使用 BMTS-lite 自动卡点","commands":[],"montage":{"bgmMediaId":"existing audio media id","videoMediaIds":["existing video media ids"],"duration":30}}. Omit videoMediaIds to use the imported videos; never include montage and commands together. Montage defaults to fast BMTS-lite, not full analysis. Some requests include sparse labeled preview frames. Use only those frames as visual evidence; they do not show the whole video. Audio energy numbers indicate loudness, not speech or lyrics. Existing text clips may contain captions. If no previews are attached, do not claim to have seen the footage. If the request needs content analysis unavailable in the context, explain the limitation and return no commands. Never invent source files or claim to have heard speech. No markdown fences."#;
+const SYSTEM: &str = r#"You are SharbCut's timeline editing assistant. Reply with ONE JSON object only: {"reply":"short Chinese explanation","commands":[...]}. Commands are SharbCut's existing camelCase command format. Allowed ops: removeClips {clipIds}, splitClips {clipIds,time}, trimClip {clipId,edge:"start"|"end",delta}, moveClips {moves:[{clipId,start,trackId}]}, setClipSpeed {clipId,speed}, updateClip {clipId,patch:{volume?,fadeIn?,fadeOut?,transitionIn?}}, addClipSegment {mediaPath,trackId?,start,sourceStart,duration,speed,patch:{}}, addTextClip {trackId?,start,duration,style:{content}}. Use ONLY ids and media paths from the provided project. Times are seconds. To make a rough cut, remove existing clips and add source-backed segments in one response. To place a BGM already in the bin, use addClipSegment on its path, with an audio track. For a request to automatically cut footage to a BGM, return {"reply":"将使用 BMTS-lite 自动卡点","commands":[],"montage":{"bgmMediaId":"existing audio media id","videoMediaIds":["existing video media ids"],"duration":30}}. Omit videoMediaIds to use the imported videos; never include montage and commands together. Montage defaults to fast BMTS-lite, not full analysis. Some requests include sparse labeled preview frames. Use only those frames as visual evidence; they do not show the whole video. Audio energy numbers indicate loudness, not speech or lyrics. An audio transcript, when provided, covers only the first 15 seconds of one selected clip and may contain recognition errors. Existing text clips may contain captions. If no previews are attached, do not claim to have seen the footage. If the request needs content analysis unavailable in the context, explain the limitation and return no commands. Never invent source files or claim to have heard speech not present in a transcript. No markdown fences."#;
 
 fn validate(command: &Command, project: &Project) -> Result<(), String> {
     let timeline = project.active();
@@ -437,6 +439,7 @@ pub fn request(
     prompt: &str,
     project: &Project,
     selected: &[String],
+    transcript: Option<&str>,
 ) -> Result<Plan, String> {
     let base = config.base_url.trim().trim_end_matches('/');
     let local_http = base.strip_prefix("http://").is_some_and(|rest| {
@@ -457,17 +460,25 @@ pub fn request(
         "media": project.media.iter().map(|item| json!({"id":item.id,"name":item.name,"path":item.path,"duration":item.duration,"kind":item.kind,"hasAudio":item.has_audio})).collect::<Vec<_>>(),
         "timeline": {"id":timeline.id,"name":timeline.name,"video":timeline.video,"tracks":timeline.tracks,"clips":timeline.clips.iter().map(|clip| json!({"id":clip.id,"name":clip.name,"mediaId":clip.media_id,"trackId":clip.track_id,"start":clip.start,"duration":clip.duration,"sourceStart":clip.source_start,"speed":clip.speed,"volume":clip.volume,"kind":clip.kind,"text":clip.text.as_ref().map(|style| &style.content),"transitionIn":clip.transition_in,"fadeIn":clip.fade_in,"fadeOut":clip.fade_out})).collect::<Vec<_>>()},
         "audioEnergy": audio,
+        "audioTranscript": transcript,
     });
     let message = format!("Current project: {context}\nUser request: {prompt}");
-    let text_body = json!({"model":config.model,"temperature":0.2,"messages":[{"role":"system","content":SYSTEM},{"role":"user","content":message}]});
+    let mut text_body = json!({"model":config.model,"messages":[{"role":"system","content":SYSTEM},{"role":"user","content":message}]});
     let previews = preview_parts(project, selected);
-    let body = if previews.is_empty() {
+    let mut body = if previews.is_empty() {
         text_body.clone()
     } else {
         let mut content = vec![json!({"type":"text","text":message})];
         content.extend(previews);
-        json!({"model":config.model,"temperature":0.2,"messages":[{"role":"system","content":SYSTEM},{"role":"user","content":content}]})
+        json!({"model":config.model,"messages":[{"role":"system","content":SYSTEM},{"role":"user","content":content}]})
     };
+    if let Some(effort) = config.reasoning_effort.as_deref() {
+        if !["none", "low", "medium", "high", "xhigh", "max"].contains(&effort) {
+            return Err("Invalid AI reasoning effort.".to_owned());
+        }
+        text_body["reasoning_effort"] = json!(effort);
+        body["reasoning_effort"] = json!(effort);
+    }
     let url = format!("{base}/chat/completions");
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(std::time::Duration::from_secs(15))
@@ -507,6 +518,119 @@ pub fn request(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_model_edits_remain_undoable() {
+        let (Ok(base_url), Ok(model), Ok(api_key)) = (
+            std::env::var("SHARBCUT_AGENT_TEST_BASE_URL"),
+            std::env::var("SHARBCUT_AGENT_TEST_MODEL"),
+            std::env::var("SHARBCUT_AGENT_TEST_API_KEY"),
+        ) else {
+            return;
+        };
+        let mut editor = concat_project::Editor::new();
+        let plan = request(
+            Config {
+                base_url,
+                model,
+                api_key,
+                reasoning_effort: Some("max".to_owned()),
+            },
+            "在当前空时间线的 0 秒位置添加一段持续 2 秒、内容为‘验收’的文字。只执行这一项编辑。",
+            editor.project(),
+            &[],
+            None,
+        )
+        .expect("live model returns a safe edit");
+        let command = plan.command.expect("the model proposed an edit");
+        editor.apply(command).expect("edit applies");
+        assert_eq!(editor.project().active().clips.len(), 1);
+        assert!(editor.undo());
+        assert!(editor.project().active().clips.is_empty());
+        assert!(editor.redo());
+        assert_eq!(editor.project().active().clips.len(), 1);
+    }
+
+    #[test]
+    fn live_model_sees_visual_context() {
+        let (Ok(base_url), Ok(model), Ok(api_key), Ok(path)) = (
+            std::env::var("SHARBCUT_AGENT_TEST_BASE_URL"),
+            std::env::var("SHARBCUT_AGENT_TEST_MODEL"),
+            std::env::var("SHARBCUT_AGENT_TEST_API_KEY"),
+            std::env::var("SHARBCUT_AGENT_TEST_IMAGE"),
+        ) else {
+            return;
+        };
+        let mut project = Project::new();
+        project.media.push(
+            serde_json::from_value(json!({
+                "id":"visual1","path":path,"name":"visual sample",
+                "kind":"image","hasAudio":false
+            }))
+            .expect("image media"),
+        );
+        let plan = request(
+            Config {
+                base_url,
+                model,
+                api_key,
+                reasoning_effort: Some("max".to_owned()),
+            },
+            "只根据附带的画面预览，指出主要颜色。不要编辑时间线。",
+            &project,
+            &[],
+            None,
+        )
+        .expect("live visual request");
+        assert!(plan.reply.contains('红') || plan.reply.to_lowercase().contains("red"));
+        assert!(plan.command.is_none());
+    }
+
+    #[test]
+    fn live_model_routes_bgm_to_lite() {
+        let (Ok(base_url), Ok(model), Ok(api_key), Ok(bgm), Ok(video)) = (
+            std::env::var("SHARBCUT_AGENT_TEST_BASE_URL"),
+            std::env::var("SHARBCUT_AGENT_TEST_MODEL"),
+            std::env::var("SHARBCUT_AGENT_TEST_API_KEY"),
+            std::env::var("SHARBCUT_AGENT_TEST_BGM"),
+            std::env::var("SHARBCUT_AGENT_TEST_VIDEO"),
+        ) else {
+            return;
+        };
+        let mut project = Project::new();
+        project.media.push(
+            serde_json::from_value(json!({
+                "id":"music1","path":bgm.clone(),"name":"project music",
+                "kind":"audio","hasAudio":true
+            }))
+            .expect("BGM media"),
+        );
+        project.media.push(
+            serde_json::from_value(json!({
+                "id":"shot1","path":video.clone(),"name":"project footage",
+                "kind":"video","hasAudio":false
+            }))
+            .expect("video media"),
+        );
+        let plan = request(
+            Config {
+                base_url,
+                model,
+                api_key,
+                reasoning_effort: Some("max".to_owned()),
+            },
+            "用已导入的 BGM 和视频自动卡点成 5 秒，结果直接进入可编辑时间线。",
+            &project,
+            &[],
+            None,
+        )
+        .expect("live montage request");
+        let montage = plan.montage.expect("the model selected the montage path");
+        assert_eq!(montage.duration, 5.0);
+        assert_eq!(montage.bgm, PathBuf::from(bgm));
+        assert_eq!(montage.videos, vec![PathBuf::from(video)]);
+        assert!(plan.command.is_none());
+    }
 
     #[test]
     fn only_undoable_timeline_edits_cross_model_boundary() {
@@ -654,10 +778,12 @@ mod tests {
                 base_url: format!("http://{address}/v1"),
                 model: "mock".into(),
                 api_key: String::new(),
+                reasoning_effort: None,
             },
             "描述画面",
             &project,
             &[],
+            None,
         )
         .expect("text fallback");
         worker.join().expect("server");
@@ -706,6 +832,15 @@ mod tests {
             assert!(length > 0, "request has a body");
             let mut request = vec![0; length];
             stream.read_exact(&mut request).expect("request body");
+            let request: Value = serde_json::from_slice(&request).expect("request json");
+            assert_eq!(request["reasoning_effort"], "max");
+            assert!(request.get("temperature").is_none());
+            assert!(
+                request["messages"][1]["content"]
+                    .as_str()
+                    .unwrap()
+                    .contains("selected speech")
+            );
             let body = json!({"choices":[{"message":{"content":r#"{"reply":"已添加","commands":[{"op":"addTextClip","trackId":"T1","start":0,"duration":2,"style":{"content":"测试"}}]}"#}}]}).to_string();
             write!(stream.get_mut(), "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).expect("response");
         });
@@ -714,10 +849,12 @@ mod tests {
                 base_url: format!("http://{address}/v1"),
                 model: "mock".to_owned(),
                 api_key: "test-only".to_owned(),
+                reasoning_effort: Some("max".to_owned()),
             },
             "添加文字",
             &Project::new(),
             &[],
+            Some("selected speech"),
         )
         .expect("model edit");
         worker.join().expect("server");

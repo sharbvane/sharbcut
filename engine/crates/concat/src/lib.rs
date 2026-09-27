@@ -919,6 +919,9 @@ pub fn run() -> Result<(), slint::PlatformError> {
     app.on_agent_model_edited(on_window!(|state, text: SharedString| {
         state.agent.model = text.to_string();
     }));
+    app.on_agent_reasoning_effort_changed(on_window!(|state, index: i32| {
+        state.agent.reasoning_effort = index;
+    }));
     app.on_agent_key_edited(on_window!(|state, text: SharedString| {
         state.agent.key_draft = text.to_string();
     }));
