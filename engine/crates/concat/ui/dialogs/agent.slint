@@ -62,7 +62,7 @@ export component AgentDialog inherits Modal {
 
                 Text {
                     text: root.data.transcript == ""
-                        ? I18n.t("可以试试：把素材剪成 30 秒，或给选中的片段添加字幕。")
+                        ? I18n.t("可以试试：把素材剪成 30 秒，或用已导入的 BGM 自动卡点。")
                         : root.data.transcript;
                     color: Theme.fg;
                     font-size: Theme.fs;

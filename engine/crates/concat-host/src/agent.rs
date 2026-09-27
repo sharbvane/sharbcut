@@ -5,9 +5,10 @@
 //! crosses back into the timeline. The UI applies the returned Batch once.
 
 use std::io::Read;
+use std::path::PathBuf;
 
 use concat_project::commands::{ClipPatch, Command, IdMint, apply};
-use concat_project::model::{Project, TextStyle};
+use concat_project::model::{MediaKind, Project, TextStyle};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -25,10 +26,22 @@ pub struct Config {
 pub struct Plan {
     /// Text shown to the user.
     pub reply: String,
-    /// None when the model answered without making an edit.
+    /// None when the model requested no direct timeline command.
     pub command: Option<Command>,
+    /// Optional fast beat-edit request over media already in the project.
+    pub montage: Option<Montage>,
     /// Number of contained operations.
     pub edits: usize,
+}
+
+/// Checked inputs for the normal BMTS-lite timeline path.
+pub struct Montage {
+    /// Imported audio source selected by the model.
+    pub bgm: PathBuf,
+    /// Imported video sources, sampled to the fast planner's limit.
+    pub videos: Vec<PathBuf>,
+    /// Requested timeline length in seconds.
+    pub duration: f64,
 }
 
 #[derive(Deserialize)]
@@ -36,9 +49,25 @@ struct ModelReply {
     reply: String,
     #[serde(default)]
     commands: Vec<Value>,
+    #[serde(default)]
+    montage: Option<ModelMontage>,
 }
 
-const SYSTEM: &str = r#"You are SharbCut's timeline editing assistant. Reply with ONE JSON object only: {"reply":"short Chinese explanation","commands":[...]}. Commands are SharbCut's existing camelCase command format. Allowed ops: removeClips {clipIds}, splitClips {clipIds,time}, trimClip {clipId,edge:"start"|"end",delta}, moveClips {moves:[{clipId,start,trackId}]}, setClipSpeed {clipId,speed}, updateClip {clipId,patch:{volume?,fadeIn?,fadeOut?,transitionIn?}}, addClipSegment {mediaPath,trackId?,start,sourceStart,duration,speed,patch:{}}, addTextClip {trackId?,start,duration,style:{content}}. Use ONLY ids and media paths from the provided project. Times are seconds. To make a rough cut, remove existing clips and add source-backed segments in one response. To place a BGM already in the bin, use addClipSegment on its path, with an audio track. If the request is ambiguous or needs content analysis unavailable in the context, explain the limitation and return no commands. Never invent source files or claim to have seen/heard footage. No markdown fences."#;
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelMontage {
+    bgm_media_id: String,
+    #[serde(default)]
+    video_media_ids: Vec<String>,
+    #[serde(default = "montage_duration")]
+    duration: f64,
+}
+
+fn montage_duration() -> f64 {
+    30.0
+}
+
+const SYSTEM: &str = r#"You are SharbCut's timeline editing assistant. Reply with ONE JSON object only: {"reply":"short Chinese explanation","commands":[...]}. Commands are SharbCut's existing camelCase command format. Allowed ops: removeClips {clipIds}, splitClips {clipIds,time}, trimClip {clipId,edge:"start"|"end",delta}, moveClips {moves:[{clipId,start,trackId}]}, setClipSpeed {clipId,speed}, updateClip {clipId,patch:{volume?,fadeIn?,fadeOut?,transitionIn?}}, addClipSegment {mediaPath,trackId?,start,sourceStart,duration,speed,patch:{}}, addTextClip {trackId?,start,duration,style:{content}}. Use ONLY ids and media paths from the provided project. Times are seconds. To make a rough cut, remove existing clips and add source-backed segments in one response. To place a BGM already in the bin, use addClipSegment on its path, with an audio track. For a request to automatically cut footage to a BGM, return {"reply":"将使用 BMTS-lite 自动卡点","commands":[],"montage":{"bgmMediaId":"existing audio media id","videoMediaIds":["existing video media ids"],"duration":30}}. Omit videoMediaIds to use the imported videos; never include montage and commands together. Montage defaults to fast BMTS-lite, not full analysis. If the request is ambiguous or needs content analysis unavailable in the context, explain the limitation and return no commands. Never invent source files or claim to have seen/heard footage. No markdown fences."#;
 
 fn validate(command: &Command, project: &Project) -> Result<(), String> {
     let timeline = project.active();
@@ -186,6 +215,64 @@ pub fn parse(content: &str, project: &Project) -> Result<Plan, String> {
     if response.commands.len() > 200 {
         return Err("AI edit plan is too large.".to_owned());
     }
+    if response.montage.is_some() && !response.commands.is_empty() {
+        return Err("AI must request a montage or timeline edits, not both.".to_owned());
+    }
+    let montage = if let Some(request) = response.montage {
+        if !request.duration.is_finite() || !(5.0..=600.0).contains(&request.duration) {
+            return Err("AI provided an invalid montage duration.".to_owned());
+        }
+        let bgm = project
+            .media
+            .iter()
+            .find(|item| item.id == request.bgm_media_id)
+            .filter(|item| {
+                item.kind == MediaKind::Audio && !item.placeholder && !item.path.is_empty()
+            })
+            .ok_or("AI referenced a missing BGM in the media bin.")?;
+        let mut videos = Vec::new();
+        if request.video_media_ids.is_empty() {
+            videos.extend(
+                project
+                    .media
+                    .iter()
+                    .filter(|item| {
+                        item.kind == MediaKind::Video && !item.placeholder && !item.path.is_empty()
+                    })
+                    .map(|item| PathBuf::from(&item.path)),
+            );
+        } else {
+            for id in request.video_media_ids {
+                let video = project
+                    .media
+                    .iter()
+                    .find(|item| item.id == id)
+                    .filter(|item| {
+                        item.kind == MediaKind::Video && !item.placeholder && !item.path.is_empty()
+                    })
+                    .ok_or("AI referenced a missing video in the media bin.")?;
+                let path = PathBuf::from(&video.path);
+                if !videos.contains(&path) {
+                    videos.push(path);
+                }
+            }
+        }
+        if videos.is_empty() {
+            return Err("Import video footage before requesting a BGM montage.".to_owned());
+        }
+        if videos.len() > 24 {
+            videos = (0..24)
+                .map(|index| videos[index * videos.len() / 24].clone())
+                .collect();
+        }
+        Some(Montage {
+            bgm: bgm.path.clone().into(),
+            videos,
+            duration: request.duration,
+        })
+    } else {
+        None
+    };
     let mut commands = Vec::with_capacity(response.commands.len());
     for value in response.commands {
         let command: Command = serde_json::from_value(value)
@@ -193,8 +280,8 @@ pub fn parse(content: &str, project: &Project) -> Result<Plan, String> {
         validate(&command, project)?;
         commands.push(command);
     }
-    let edits = commands.len();
-    let command = if edits == 0 {
+    let edits = commands.len() + usize::from(montage.is_some());
+    let command = if commands.is_empty() {
         None
     } else {
         let command = Command::Batch { commands };
@@ -208,6 +295,7 @@ pub fn parse(content: &str, project: &Project) -> Result<Plan, String> {
     Ok(Plan {
         reply: response.reply,
         command,
+        montage,
         edits,
     })
 }
@@ -283,6 +371,68 @@ mod tests {
                 &project
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn montage_uses_only_imported_media_and_defaults_to_lite_inputs() {
+        let mut project = Project::new();
+        project.media.push(
+            serde_json::from_value(json!({
+                "id":"m1","path":"C:/music.mp3","name":"music","duration":60,
+                "kind":"audio","hasAudio":true
+            }))
+            .expect("audio"),
+        );
+        project.media.push(
+            serde_json::from_value(json!({
+                "id":"m2","path":"D:/shot.mp4","name":"shot","duration":20,
+                "kind":"video","hasAudio":false
+            }))
+            .expect("video"),
+        );
+        let response = r#"{"reply":"开始卡点","montage":{"bgmMediaId":"m1"},"commands":[]}"#;
+        let plan = parse(response, &project).expect("checked montage");
+        let montage = plan.montage.expect("montage action");
+        assert_eq!(montage.duration, 30.0);
+        assert_eq!(montage.bgm, PathBuf::from("C:/music.mp3"));
+        assert_eq!(montage.videos, vec![PathBuf::from("D:/shot.mp4")]);
+        assert!(plan.command.is_none());
+        assert!(
+            parse(
+                r#"{"reply":"x","montage":{"bgmMediaId":"missing"}}"#,
+                &project
+            )
+            .is_err()
+        );
+        assert!(
+            parse(
+                r#"{"reply":"x","montage":{"bgmMediaId":"m1","videoMediaIds":["m1"]}}"#,
+                &project
+            )
+            .is_err()
+        );
+        assert!(
+            parse(
+                r#"{"reply":"x","montage":{"bgmMediaId":"m1"},"commands":[{"op":"addTextClip","start":0,"duration":1,"style":{"content":"x"}}]}"#,
+                &project
+            )
+            .is_err()
+        );
+        for index in 3..=27 {
+            let mut video = project.media[1].clone();
+            video.id = format!("m{index}");
+            video.path = format!("D:/shot-{index}.mp4");
+            project.media.push(video);
+        }
+        assert_eq!(
+            parse(response, &project)
+                .unwrap()
+                .montage
+                .unwrap()
+                .videos
+                .len(),
+            24
         );
     }
 

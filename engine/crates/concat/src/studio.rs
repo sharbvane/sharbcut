@@ -2209,6 +2209,17 @@ impl Studio {
         library: std::path::PathBuf,
         full: bool,
     ) {
+        self.generate_montage_sources(bgm, library, Vec::new(), full, 30.0);
+    }
+
+    fn generate_montage_sources(
+        &mut self,
+        bgm: std::path::PathBuf,
+        library: std::path::PathBuf,
+        sources: Vec<std::path::PathBuf>,
+        full: bool,
+        duration: f64,
+    ) {
         if self.montage_busy {
             return;
         }
@@ -2216,6 +2227,7 @@ impl Studio {
             return;
         };
         let project_path = session.path().to_owned();
+        let revision = self.revision;
         let settings = session.settings();
         let runtime_root = if cfg!(debug_assertions) {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -2265,8 +2277,9 @@ impl Studio {
             project_dir: std::path::PathBuf::from(&project_path),
             bgm,
             library,
+            sources,
             theme: settings.name,
-            duration: 30.0,
+            duration,
             ratio: format!("{}x{}", settings.width, settings.height),
         };
         self.montage_busy = true;
@@ -2275,10 +2288,11 @@ impl Studio {
             move || montage::generate(input),
             move |studio, _, _, result| {
                 studio.montage_busy = false;
-                if studio
-                    .session
-                    .as_ref()
-                    .is_none_or(|session| session.path() != project_path)
+                if studio.revision != revision
+                    || studio
+                        .session
+                        .as_ref()
+                        .is_none_or(|session| session.path() != project_path)
                 {
                     studio.notify(
                         &t("Project changed while generating montage; result was not imported"),
@@ -2350,19 +2364,20 @@ impl Studio {
                 studio.agent.busy = false;
                 match result {
                     Ok(plan) => {
-                        if let Some(command) = plan.command {
-                            if studio.revision != revision
+                        if (plan.command.is_some() || plan.montage.is_some())
+                            && (studio.revision != revision
                                 || studio
                                     .session
                                     .as_ref()
-                                    .is_none_or(|session| session.path() != path)
-                            {
-                                studio
-                                    .agent
-                                    .transcript
-                                    .push_str("系统：项目已变化，未应用本次 AI 修改。\n\n");
-                                return;
-                            }
+                                    .is_none_or(|session| session.path() != path))
+                        {
+                            studio
+                                .agent
+                                .transcript
+                                .push_str("系统：项目已变化，未应用本次 AI 修改。\n\n");
+                            return;
+                        }
+                        if let Some(command) = plan.command {
                             if studio.apply(command).is_none() {
                                 studio
                                     .agent
@@ -2370,6 +2385,22 @@ impl Studio {
                                     .push_str("系统：AI 修改未能应用，请重试。\n\n");
                                 return;
                             }
+                        }
+                        if let Some(montage) = plan.montage {
+                            if studio.montage_busy {
+                                studio
+                                    .agent
+                                    .transcript
+                                    .push_str("系统：卡点任务正在运行，请等待完成。\n\n");
+                                return;
+                            }
+                            studio.generate_montage_sources(
+                                montage.bgm,
+                                std::path::PathBuf::new(),
+                                montage.videos,
+                                false,
+                                montage.duration,
+                            );
                         }
                         studio
                             .agent

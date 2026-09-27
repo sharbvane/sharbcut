@@ -163,6 +163,8 @@ pub struct Generation {
     pub bgm: PathBuf,
     /// User-selected read-only footage library.
     pub library: PathBuf,
+    /// Imported project videos for an Agent request; Lite mode only.
+    pub sources: Vec<PathBuf>,
     /// Visual direction.
     pub theme: String,
     /// Requested output seconds.
@@ -185,8 +187,12 @@ pub fn generate(input: Generation) -> Result<PathBuf, String> {
     {
         return Err("BGM Montage runtime is missing. Run scripts/setup-dev.ps1.".to_owned());
     }
-    if !input.bgm.is_file() || !input.library.is_dir() {
-        return Err("Select an existing BGM file and footage folder.".to_owned());
+    if !input.bgm.is_file()
+        || (input.sources.is_empty() && !input.library.is_dir())
+        || (input.mode == Mode::Full && (!input.library.is_dir() || !input.sources.is_empty()))
+        || input.sources.iter().any(|source| !source.is_file())
+    {
+        return Err("Select an existing BGM file and footage.".to_owned());
     }
     let duration = media::probe(&input.bgm.to_string_lossy())?
         .duration
@@ -328,14 +334,13 @@ fn generate_lite(
         ),
     )
     .map_err(|error| error.to_string())?;
-    let output = Process::new(&input.python)
+    let mut process = Process::new(&input.python);
+    process
         .arg(&input.lite_script)
         .arg("--lite-root")
         .arg(&input.lite_root)
         .arg("--bgm")
         .arg(&input.bgm)
-        .arg("--library")
-        .arg(&input.library)
         .arg("--duration")
         .arg(duration.to_string())
         .arg("--cache-dir")
@@ -345,7 +350,15 @@ fn generate_lite(
         .env("PATH", path)
         .env("TEMP", temp_dir)
         .env("TMP", temp_dir)
-        .env("NUMBA_CACHE_DIR", cache_dir.join("numba"))
+        .env("NUMBA_CACHE_DIR", cache_dir.join("numba"));
+    if input.sources.is_empty() {
+        process.arg("--library").arg(&input.library);
+    } else {
+        for source in &input.sources {
+            process.arg("--source").arg(source);
+        }
+    }
+    let output = process
         .output()
         .map_err(|error| format!("Cannot start BMTS Lite: {error}"))?;
     if !output.status.success() {
@@ -687,6 +700,18 @@ mod tests {
                     root.join("vendor/ffmpeg-n8.1-latest-win64-gpl-shared-8.1/bin"),
                 )
             };
+        let sources = if std::env::var_os("SHARBCUT_MONTAGE_TEST_SOURCES").is_some() {
+            let mut files = std::fs::read_dir(&library)
+                .expect("test library")
+                .map(|entry| entry.expect("entry").path())
+                .filter(|path| path.is_file())
+                .collect::<Vec<_>>();
+            files.sort();
+            files.truncate(6);
+            files
+        } else {
+            Vec::new()
+        };
         let plan = generate(Generation {
             mode: if std::env::var_os("SHARBCUT_MONTAGE_TEST_FULL").is_some() {
                 Mode::Full
@@ -700,7 +725,12 @@ mod tests {
             ffmpeg_bin,
             project_dir: root.join(".tools/montage-integration-test"),
             bgm: bgm.into(),
-            library: library.into(),
+            library: if sources.is_empty() {
+                library.into()
+            } else {
+                PathBuf::new()
+            },
+            sources,
             theme: "Iceland cinematic landscape".to_owned(),
             duration: 5.0,
             ratio: "1920x1080".to_owned(),

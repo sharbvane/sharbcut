@@ -15,7 +15,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--lite-root", type=Path, required=True)
     parser.add_argument("--bgm", type=Path, required=True)
-    parser.add_argument("--library", type=Path, required=True)
+    parser.add_argument("--library", type=Path)
+    parser.add_argument("--source", type=Path, action="append", default=[])
     parser.add_argument("--duration", type=float, required=True)
     parser.add_argument("--cache-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -23,8 +24,10 @@ def main():
 
     if not args.lite_root.joinpath("worker.py").is_file():
         parser.error("BMTS Lite source is missing")
-    if not args.bgm.is_file() or not args.library.is_dir():
-        parser.error("BGM and footage folder must exist")
+    if not args.bgm.is_file():
+        parser.error("BGM must exist")
+    if not args.source and (args.library is None or not args.library.is_dir()):
+        parser.error("footage folder must exist")
     if not math.isfinite(args.duration) or args.duration < 5:
         parser.error("duration must be at least five seconds")
 
@@ -47,7 +50,10 @@ def main():
     )
     slots = plan_timeline_slots(audio, duration)["slots"]
     extensions = {".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi", ".wmv", ".flv", ".mts", ".m2ts", ".ts"}
-    files = sorted(path for path in args.library.rglob("*") if path.is_file() and path.suffix.lower() in extensions)
+    if args.source and any(not path.is_file() for path in args.source):
+        parser.error("selected footage must exist")
+    files = args.source or sorted(path for path in args.library.rglob("*") if path.is_file() and path.suffix.lower() in extensions)
+    files = [path for path in files if path.suffix.lower() in extensions]
     if not files:
         parser.error("footage folder has no videos")
     # ponytail: probe at most 24 evenly-spaced videos; add an explicit library picker if selection quality needs finer control.
