@@ -57,6 +57,9 @@ rfd = "0.17"
 # Reveal an exported file in the platform's file manager.
 opener = { version = "0.8", features = ["reveal"] }
 
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Security_Credentials", "Win32_Foundation"] }
+
 [target.'cfg(target_os = "ios")'.dependencies]
 slint = { version = "1.17", default-features = false, features = [
     "std",

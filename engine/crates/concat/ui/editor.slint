@@ -72,8 +72,11 @@ export global Editor {
     in-out property <int> media-count-images;
     in-out property <int> media-selected-count;
     in-out property <bool> importing;
+    in-out property <bool> montage-busy;
 
     callback import-media();
+    callback import-montage();
+    callback generate-montage(full: bool);
     callback media-filter-changed(filter: MediaFilter);
     callback media-sort-changed(index: int);
     callback media-select(id: int, additive: bool);

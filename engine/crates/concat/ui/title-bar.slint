@@ -134,6 +134,7 @@ export component TitleBar inherits Rectangle {
     /// Which menu is open, or -1.
     in property <int> menu: -1;
     callback open-settings();
+    callback open-agent();
     /// A view was picked from the add-panel list.
     callback add-pane(kind: PaneKind);
     callback export-clicked();
@@ -224,6 +225,11 @@ export component TitleBar inherits Rectangle {
         }
 
         Rectangle { horizontal-stretch: 1; }
+
+        if !root.minimal: MenuLabel {
+            label: I18n.t("AI 剪辑");
+            clicked => { root.open-agent(); }
+        }
 
         // Beside Settings, because it is the same sort of thing: neither one
         // is about the project, both are about the window you are looking at

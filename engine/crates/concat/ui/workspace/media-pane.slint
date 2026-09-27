@@ -1265,10 +1265,14 @@ export component MediaPane inherits Rectangle {
     /// how many of the whole bin are selected, not how many of `items` are
     in property <int> selected-count;
     in property <bool> importing;
+    in property <bool> montage-busy;
+    in-out property <int> montage-mode: 0;
 
     out property <MediaFilter> filter: MediaFilter.all;
 
     callback import-media();
+    callback import-montage();
+    callback generate-montage(full: bool);
     callback filter-changed(filter: MediaFilter);
     /// The sort dropdown beside the import button picked a new order.
     callback sort-changed(index: int);
@@ -1758,6 +1762,46 @@ export component MediaPane inherits Rectangle {
                         icons: [Glyph.clock, Glyph.text-mark, Glyph.tag];
                         current: 0;
                         changed(index) => { root.sort-changed(index); }
+                    }
+                }
+
+                if root.tab == 0: HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    padding-bottom: 8px;
+                    ImportButton {
+                        width: parent.width - 16px;
+                        height: Theme.h;
+                        label: I18n.t("Import BGM montage");
+                        glyph: Glyph.music;
+                        clicked => { root.import-montage(); }
+                    }
+                }
+
+                if root.tab == 0: HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    padding-bottom: 8px;
+                    Select {
+                        width: parent.width - 16px;
+                        options: [I18n.t("BMTS Lite"), I18n.t("Full analysis")];
+                        current: root.montage-mode;
+                        changed(index) => { root.montage-mode = index; }
+                    }
+                }
+
+                if root.tab == 0: HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    padding-bottom: 8px;
+                    ImportButton {
+                        width: parent.width - 16px;
+                        height: Theme.h;
+                        label: I18n.t("Generate BGM montage");
+                        busy-label: I18n.t("Generating montage…");
+                        busy: root.montage-busy;
+                        glyph: Glyph.sparkle;
+                        clicked => { root.generate-montage(root.montage-mode == 1); }
                     }
                 }
 

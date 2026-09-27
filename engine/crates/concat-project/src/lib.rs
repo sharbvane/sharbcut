@@ -872,6 +872,63 @@ mod tests {
     }
 
     #[test]
+    fn decided_segments_are_editable_and_undo_as_one_import() {
+        let mut editor = Editor::new();
+        let segment = |start, source_start, duration, speed| Command::AddClipSegment {
+            media_path: "/a.mp4".to_owned(),
+            track_id: Some("T1".to_owned()),
+            start,
+            source_start,
+            duration,
+            speed,
+            patch: ClipPatch {
+                volume: Some(0.8),
+                ..Default::default()
+            },
+        };
+        editor
+            .apply(Command::Batch {
+                commands: vec![
+                    media("/a.mp4", 10.0, true),
+                    segment(0.0, 2.0, 1.5, 2.0),
+                    segment(1.5, 5.0, 2.0, 1.0),
+                ],
+            })
+            .expect("imports decided cuts");
+        let clips = &editor.project().active().clips;
+        assert_eq!(clips.len(), 2);
+        assert_eq!(
+            (
+                clips[0].start,
+                clips[0].source_start,
+                clips[0].duration,
+                clips[0].speed
+            ),
+            (0.0, 2.0, 1.5, 2.0)
+        );
+        assert_eq!(clips[0].volume, 0.8);
+        let clip_id = clips[0].id.clone();
+        editor
+            .apply(Command::SplitClips {
+                clip_ids: vec![clip_id],
+                time: 0.75,
+            })
+            .expect("still editable");
+        assert_eq!(editor.project().active().clips.len(), 3);
+        assert!(editor.undo());
+        assert_eq!(editor.project().active().clips.len(), 2);
+        assert!(editor.undo());
+        assert!(editor.project().active().clips.is_empty());
+        assert!(editor.project().media.is_empty());
+        assert!(editor.redo());
+        assert_eq!(editor.project().active().clips.len(), 2);
+
+        let before = editor.project().clone();
+        assert!(editor.apply(segment(3.5, 0.0, f64::NAN, 1.0)).is_err());
+        assert_eq!(editor.project(), &before);
+    }
+
+    #[test]
     fn a_failed_batch_changes_nothing() {
         let (mut editor, _, clip_id) = fixture();
         let before = editor.project().clone();

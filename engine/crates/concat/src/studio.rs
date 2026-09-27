@@ -35,7 +35,8 @@ use concat_host::export::{self, ExportSpec};
 use concat_host::playback::ClipSpec;
 use concat_host::preview::FrameSpec;
 use concat_host::{
-    AnalyseRequest, Cutouts, ProjectInfo, RegionRequest, Session, media, projects, templates,
+    AnalyseRequest, Cutouts, ProjectInfo, RegionRequest, Session, agent, media, montage, projects,
+    templates,
 };
 use concat_media::{Peaks, jpeg};
 use concat_project::commands::{ClipMove, ClipPatch, TrackFlag, TrimEdge};
@@ -275,6 +276,17 @@ pub struct SettingsState {
     pub language: usize,
     /// The switch that keeps the playhead inside the content.
     pub playhead_stops: bool,
+}
+
+pub struct AgentState {
+    pub open: bool,
+    pub busy: bool,
+    pub transcript: String,
+    pub prompt: String,
+    pub base_url: String,
+    pub model: String,
+    pub key_draft: String,
+    pub key_saved: bool,
 }
 
 /// The bottom-right notice: one at a time. The token is what the panel
@@ -649,6 +661,7 @@ pub struct Studio {
     media_filter: MediaFilter,
     /// 0 = Added, 1 = Name, 2 = Kind
     media_sort: usize,
+    montage_busy: bool,
     /// Decoded art by media id, and the ids a worker is decoding for.
     pub peaks: HashMap<String, Arc<Peaks>>,
     pub thumbs: HashMap<String, slint::Image>,
@@ -685,6 +698,7 @@ pub struct Studio {
     // ── the sheets and menus ──
     pub export: ExportState,
     pub settings: SettingsState,
+    pub agent: AgentState,
     pub transcribers: Vec<ModelState>,
     pub voices: Vec<ModelState>,
     pub open_menu: i32,
@@ -1313,6 +1327,19 @@ impl Studio {
     /// read off disk.
     pub fn new(host: Host) -> Self {
         let prefs = Preferences::load(&host.dirs);
+        let agent = AgentState {
+            open: false,
+            busy: false,
+            transcript: String::new(),
+            prompt: String::new(),
+            base_url: prefs
+                .ai_base_url
+                .clone()
+                .unwrap_or_else(|| "https://api.openai.com/v1".to_owned()),
+            model: prefs.ai_model.clone().unwrap_or_default(),
+            key_draft: String::new(),
+            key_saved: crate::prefs::load_api_key().ok().flatten().is_some(),
+        };
         // The words first, so everything published from here on is in
         // the remembered language.
         let locale = prefs.locale.as_deref().unwrap_or("zh-Hans").to_owned();
@@ -1333,6 +1360,7 @@ impl Studio {
             media_selected: HashSet::new(),
             media_filter: MediaFilter::All,
             media_sort: 0,
+            montage_busy: false,
             peaks: HashMap::new(),
             thumbs: HashMap::new(),
             strips: HashMap::new(),
@@ -1356,6 +1384,7 @@ impl Studio {
             preview_failed: false,
             export: ExportState::default(),
             settings: SettingsState::default(),
+            agent,
             transcribers: Vec::new(),
             voices: Vec::new(),
             open_menu: -1,
@@ -2135,6 +2164,222 @@ impl Studio {
                         },
                         false,
                     );
+                }
+            },
+        );
+    }
+
+    /// Import a beat edit as source-backed clips on the current timeline.
+    pub fn import_montage(&mut self, path: std::path::PathBuf) {
+        let Some(session) = self.session.as_ref() else {
+            return;
+        };
+        let project_path = session.path().to_owned();
+        let project = session.project().clone();
+        let revision = self.revision;
+        spawn(
+            move || montage::prepare(&path, &project),
+            move |studio, _, _, result| match result {
+                Ok(prepared) => {
+                    if studio.revision != revision
+                        || studio
+                            .session
+                            .as_ref()
+                            .is_none_or(|session| session.path() != project_path)
+                    {
+                        studio.notify(
+                            &t("Project changed while importing montage; please retry"),
+                            true,
+                        );
+                        return;
+                    }
+                    if studio.apply(prepared.command).is_some() {
+                        studio.notify(&tf("Imported {0} montage cuts", &[&prepared.shots]), false);
+                    }
+                }
+                Err(error) => studio.notify(&error, true),
+            },
+        );
+    }
+
+    /// Run the pinned local-library planner, then import its editable plan.
+    pub fn generate_montage(
+        &mut self,
+        bgm: std::path::PathBuf,
+        library: std::path::PathBuf,
+        full: bool,
+    ) {
+        if self.montage_busy {
+            return;
+        }
+        let Some(session) = self.session.as_ref() else {
+            return;
+        };
+        let project_path = session.path().to_owned();
+        let settings = session.settings();
+        let runtime_root = if cfg!(debug_assertions) {
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join("..")
+                .join("..")
+        } else {
+            match std::env::current_exe()
+                .ok()
+                .and_then(|path| path.parent().map(std::path::Path::to_path_buf))
+            {
+                Some(path) => path,
+                None => {
+                    self.notify(&t("Cannot locate BGM Montage runtime"), true);
+                    return;
+                }
+            }
+        };
+        let (python, script, lite_root, lite_script, ffmpeg_bin) = if cfg!(debug_assertions) {
+            (
+                runtime_root.join(".tools/bgm-venv/Scripts/python.exe"),
+                runtime_root.join("vendor/bgm-montage/scripts/bgm_montage.py"),
+                runtime_root.join("vendor/bmts-lite"),
+                runtime_root.join("scripts/bmts-lite-plan.py"),
+                runtime_root.join("vendor/ffmpeg-n8.1-latest-win64-gpl-shared-8.1/bin"),
+            )
+        } else {
+            (
+                runtime_root.join("bgm-runtime/python/python.exe"),
+                runtime_root.join("bgm-runtime/bgm-montage/scripts/bgm_montage.py"),
+                runtime_root.join("bgm-runtime/bmts-lite"),
+                runtime_root.join("bgm-runtime/bmts-lite-plan.py"),
+                runtime_root.join("bgm-runtime/ffmpeg/bin"),
+            )
+        };
+        let input = montage::Generation {
+            mode: if full {
+                montage::Mode::Full
+            } else {
+                montage::Mode::Lite
+            },
+            python,
+            script,
+            lite_root,
+            lite_script,
+            ffmpeg_bin,
+            project_dir: std::path::PathBuf::from(&project_path),
+            bgm,
+            library,
+            theme: settings.name,
+            duration: 30.0,
+            ratio: format!("{}x{}", settings.width, settings.height),
+        };
+        self.montage_busy = true;
+        self.notify(&t("Generating beat montage in the background"), false);
+        spawn(
+            move || montage::generate(input),
+            move |studio, _, _, result| {
+                studio.montage_busy = false;
+                if studio
+                    .session
+                    .as_ref()
+                    .is_none_or(|session| session.path() != project_path)
+                {
+                    studio.notify(
+                        &t("Project changed while generating montage; result was not imported"),
+                        true,
+                    );
+                    return;
+                }
+                match result {
+                    Ok(path) => studio.import_montage(path),
+                    Err(error) => studio.notify(&error, true),
+                }
+            },
+        );
+    }
+
+    pub fn agent_save_config(&mut self) -> bool {
+        self.prefs.ai_base_url = Some(self.agent.base_url.trim().to_owned());
+        self.prefs.ai_model = Some(self.agent.model.trim().to_owned());
+        if !self.agent.key_draft.is_empty() {
+            if let Err(error) = crate::prefs::save_api_key(&self.agent.key_draft) {
+                self.notify(&error, true);
+                return false;
+            }
+            self.agent.key_draft.clear();
+            self.agent.key_saved = true;
+        }
+        self.prefs.save(&self.host.dirs);
+        self.notify(&t("AI 配置已保存"), false);
+        true
+    }
+
+    pub fn agent_send(&mut self) {
+        if self.agent.busy || !self.agent_save_config() {
+            return;
+        }
+        let Some(session) = self.session.as_ref() else {
+            self.notify(&t("请先打开项目"), true);
+            return;
+        };
+        let key = match crate::prefs::load_api_key() {
+            Ok(key) => key.unwrap_or_default(),
+            Err(error) => {
+                self.notify(&error, true);
+                return;
+            }
+        };
+        let prompt = self.agent.prompt.trim().to_owned();
+        if prompt.is_empty() {
+            return;
+        }
+        let context_prompt = format!(
+            "{prompt}\nSelected clips: {:?}; playhead: {:.3} seconds",
+            self.selection, self.playhead
+        );
+        let config = agent::Config {
+            base_url: self.agent.base_url.clone(),
+            model: self.agent.model.clone(),
+            api_key: key,
+        };
+        let project = session.project().clone();
+        let path = session.path().to_owned();
+        let revision = self.revision;
+        self.agent.transcript.push_str(&format!("你：{prompt}\n"));
+        self.agent.prompt.clear();
+        self.agent.busy = true;
+        spawn(
+            move || agent::request(config, &context_prompt, &project),
+            move |studio, _, _, result| {
+                studio.agent.busy = false;
+                match result {
+                    Ok(plan) => {
+                        if let Some(command) = plan.command {
+                            if studio.revision != revision
+                                || studio
+                                    .session
+                                    .as_ref()
+                                    .is_none_or(|session| session.path() != path)
+                            {
+                                studio
+                                    .agent
+                                    .transcript
+                                    .push_str("系统：项目已变化，未应用本次 AI 修改。\n\n");
+                                return;
+                            }
+                            if studio.apply(command).is_none() {
+                                studio
+                                    .agent
+                                    .transcript
+                                    .push_str("系统：AI 修改未能应用，请重试。\n\n");
+                                return;
+                            }
+                        }
+                        studio
+                            .agent
+                            .transcript
+                            .push_str(&format!("AI：{}\n\n", plan.reply));
+                    }
+                    Err(error) => studio
+                        .agent
+                        .transcript
+                        .push_str(&format!("系统：{error}\n\n")),
                 }
             },
         );
@@ -6317,7 +6562,12 @@ impl Studio {
         app.set_on_start(self.on_start);
         app.set_project_name(self.project_name.as_str().into());
         app.set_project_status(
-            if self.dirty { t("unsaved changes") } else { t("saved") }.into(),
+            if self.dirty {
+                t("unsaved changes")
+            } else {
+                t("saved")
+            }
+            .into(),
         );
         app.set_toast(ToastData {
             token: self.toast.token,
@@ -6454,6 +6704,7 @@ impl Studio {
         );
         editor.set_media_selected_count(self.media_selected.len() as i32);
         editor.set_importing(false);
+        editor.set_montage_busy(self.montage_busy);
 
         let (width, height) = self.output_size();
         editor.set_output_width(width as i32);
@@ -6521,6 +6772,16 @@ impl Studio {
             },
             version: env!("CARGO_PKG_VERSION").into(),
             engine: format!("concat-engine · FFmpeg {}", concat_media::linked_version()).into(),
+        });
+        app.set_agent(AgentData {
+            open: self.agent.open,
+            busy: self.agent.busy,
+            transcript: self.agent.transcript.as_str().into(),
+            prompt: self.agent.prompt.as_str().into(),
+            base_url: self.agent.base_url.as_str().into(),
+            model: self.agent.model.as_str().into(),
+            key_draft: self.agent.key_draft.as_str().into(),
+            key_saved: self.agent.key_saved,
         });
         sync(&models.transcribers, Self::model_rows(&self.transcribers));
         sync(&models.voices, Self::model_rows(&self.voices));

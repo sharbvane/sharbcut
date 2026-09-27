@@ -18,9 +18,17 @@ fn main() {
     // Not `EmbedForSoftwareRenderer`, which pre-decodes to raw pixels: that is
     // for MCUs with no filesystem, it is the only kind the software renderer
     // can read, and Skia and FemtoVG cannot use it at all.
-    let config = slint_build::CompilerConfiguration::new()
-        .embed_resources(slint_build::EmbedResourcesKind::EmbedFiles);
-    slint_build::compile_with_config("ui/app.slint", config)
+    // The branded editor tree exceeds Windows' default build-script stack in Release.
+    std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(|| {
+            let config = slint_build::CompilerConfiguration::new()
+                .embed_resources(slint_build::EmbedResourcesKind::EmbedFiles);
+            slint_build::compile_with_config("ui/app.slint", config)
+        })
+        .expect("failed to start Slint compiler")
+        .join()
+        .expect("Slint compiler thread panicked")
         .expect("failed to compile ui/app.slint");
 
     // Three facts about the build that the built thing cannot ask for at run

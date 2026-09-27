@@ -436,6 +436,33 @@ pub fn run() -> Result<(), slint::PlatformError> {
             state.import(paths);
         }
     }));
+    editor.on_import_montage(on_window!(|state| {
+        if state.session.is_none() {
+            return;
+        }
+        if let Some(paths) =
+            platform::pick_files(&i18n::t("Import BGM montage"), Some(("JSON", &["json"])))
+            && let Some(path) = paths.into_iter().next()
+        {
+            state.import_montage(path);
+        }
+    }));
+    editor.on_generate_montage(on_window!(|state, full: bool| {
+        if state.session.is_none() {
+            return;
+        }
+        let Some(bgm) = platform::pick_files(
+            &i18n::t("Choose BGM"),
+            Some(("Audio", &["mp3", "wav", "aac", "m4a", "flac", "ogg"])),
+        )
+        .and_then(|files| files.into_iter().next()) else {
+            return;
+        };
+        let Some(library) = platform::pick_folder(&i18n::t("Choose footage folder"), "") else {
+            return;
+        };
+        state.generate_montage(bgm, library, full);
+    }));
     editor.on_media_activate(on_window!(|state, id: i32| {
         state.place_at_playhead(&format!("media:{id}"));
     }));
@@ -876,6 +903,39 @@ pub fn run() -> Result<(), slint::PlatformError> {
     app.on_open_settings(on_window!(|state| {
         state.refresh_models();
         state.settings.open = true;
+    }));
+    app.on_open_agent(on_window!(|state| {
+        state.agent.open = true;
+    }));
+    app.on_agent_closed(on_window!(|state| {
+        state.agent.open = false;
+    }));
+    app.on_agent_prompt_edited(on_window!(|state, text: SharedString| {
+        state.agent.prompt = text.to_string();
+    }));
+    app.on_agent_base_url_edited(on_window!(|state, text: SharedString| {
+        state.agent.base_url = text.to_string();
+    }));
+    app.on_agent_model_edited(on_window!(|state, text: SharedString| {
+        state.agent.model = text.to_string();
+    }));
+    app.on_agent_key_edited(on_window!(|state, text: SharedString| {
+        state.agent.key_draft = text.to_string();
+    }));
+    app.on_agent_save_config(on_window!(|state| {
+        state.agent_save_config();
+    }));
+    app.on_agent_clear_key(on_window!(|state| {
+        if let Err(error) = prefs::save_api_key("") {
+            state.notify(&error, true);
+        } else {
+            state.agent.key_draft.clear();
+            state.agent.key_saved = false;
+            state.notify(&i18n::t("AI Key 已清除"), false);
+        }
+    }));
+    app.on_agent_send(on_window!(|state| {
+        state.agent_send();
     }));
     // The theme is one bool on the Theme global, and every colour in the
     // tree is a binding away from it; it is also remembered.

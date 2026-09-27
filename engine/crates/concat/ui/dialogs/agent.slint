@@ -1,0 +1,143 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 SharbCut contributors
+
+import { I18n } from "../i18n.slint";
+import { Theme } from "../theme/theme.slint";
+import { Glyph } from "../icons.slint";
+import { Button, DialogRow, Field, Modal } from "../primitives/modal.slint";
+import { PaneScroll } from "../workspace/pane.slint";
+
+export struct AgentData {
+    open: bool,
+    busy: bool,
+    transcript: string,
+    prompt: string,
+    base-url: string,
+    model: string,
+    key-draft: string,
+    key-saved: bool,
+}
+
+export component AgentDialog inherits Modal {
+    in property <AgentData> data;
+
+    callback prompt-edited(text: string);
+    callback base-url-edited(text: string);
+    callback model-edited(text: string);
+    callback key-edited(text: string);
+    callback save-config();
+    callback clear-key();
+    callback send();
+
+    open: root.data.open;
+    title: I18n.t("AI 剪辑助手");
+    glyph: Glyph.sparkle;
+    surface-width: 700px;
+    surface-height: 600px;
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+
+        Text {
+            text: I18n.t("直接编辑当前时间线，所有修改都可以撤销。项目元数据会发送到你配置的模型服务。");
+            color: Theme.fg-dim;
+            font-size: Theme.fs-sm;
+            wrap: word-wrap;
+        }
+
+        Rectangle {
+            height: 220px;
+            border-radius: Theme.r;
+            border-width: 1px;
+            border-color: Theme.line;
+            background: Theme.raised;
+            clip: true;
+
+            PaneScroll {
+                x: 8px;
+                y: 8px;
+                width: parent.width - 16px;
+                height: parent.height - 16px;
+
+                Text {
+                    text: root.data.transcript == ""
+                        ? I18n.t("可以试试：把素材剪成 30 秒，或给选中的片段添加字幕。")
+                        : root.data.transcript;
+                    color: Theme.fg;
+                    font-size: Theme.fs;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            Field {
+                value: root.data.prompt;
+                placeholder: I18n.t("描述想要的剪辑，例如：前面节奏快一点");
+                edited(text) => { root.prompt-edited(text); }
+            }
+            Button {
+                label: root.data.busy ? I18n.t("处理中…") : I18n.t("发送并应用");
+                glyph: Glyph.sparkle;
+                primary: true;
+                enabled: !root.data.busy && root.data.prompt != "" && root.data.model != "";
+                clicked => { root.send(); }
+            }
+        }
+
+        Rectangle { height: 1px; background: Theme.line; }
+
+        Text {
+            text: I18n.t("模型连接");
+            color: Theme.fg;
+            font-size: Theme.fs-lg;
+            font-weight: Theme.weight-title;
+        }
+
+        DialogRow {
+            label: "Base URL";
+            Field {
+                value: root.data.base-url;
+                technical: true;
+                placeholder: "https://api.openai.com/v1";
+                edited(text) => { root.base-url-edited(text); }
+            }
+        }
+        DialogRow {
+            label: I18n.t("模型");
+            Field {
+                value: root.data.model;
+                technical: true;
+                placeholder: "model-name";
+                edited(text) => { root.model-edited(text); }
+            }
+        }
+        DialogRow {
+            label: "API Key";
+            Field {
+                value: root.data.key-draft;
+                secret: true;
+                technical: true;
+                placeholder: root.data.key-saved ? I18n.t("已安全保存；输入新 Key 可替换") : I18n.t("输入 API Key");
+                edited(text) => { root.key-edited(text); }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            Rectangle { horizontal-stretch: 1; }
+            Button {
+                label: I18n.t("清除 Key");
+                enabled: root.data.key-saved && !root.data.busy;
+                clicked => { root.clear-key(); }
+            }
+            Button {
+                label: I18n.t("保存配置");
+                primary: true;
+                clicked => { root.save-config(); }
+            }
+        }
+    }
+}

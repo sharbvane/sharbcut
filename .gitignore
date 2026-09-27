@@ -9,6 +9,7 @@ target/
 
 # Project-local toolchains and caches.
 /.tools/
+/release/
 
 # Nix build output
 /result

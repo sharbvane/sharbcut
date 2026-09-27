@@ -99,8 +99,11 @@ export component Seat inherits Rectangle {
             count-images: Editor.media-count-images;
             selected-count: Editor.media-selected-count;
             importing: Editor.importing;
+            montage-busy: Editor.montage-busy;
 
             import-media => { Editor.import-media(); }
+            import-montage => { Editor.import-montage(); }
+            generate-montage(full) => { Editor.generate-montage(full); }
             filter-changed(filter) => { Editor.media-filter-changed(filter); }
             sort-changed(index) => { Editor.media-sort-changed(index); }
             floor-pressed => { Editor.blur(); }

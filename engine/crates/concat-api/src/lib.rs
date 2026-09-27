@@ -131,6 +131,7 @@ impl Api {
             Request::EditRedo { path } => view(self.session_mut(&path)?.redo()),
             Request::MediaProbe { path } => Ok(Reply::Media(media::probe(&path)?)),
             Request::MediaImport { path, file } => view(self.import(&path, &file)?),
+            Request::MontageImport { path, file } => view(self.import_montage(&path, &file)?),
             Request::CatalogueList { kind } => Ok(Reply::Packages(catalogue(kind.as_deref())?)),
             Request::TemplateList => Ok(Reply::Templates(templates::list(&self.dirs.config))),
             Request::TemplateInstantiate {
@@ -244,6 +245,16 @@ impl Api {
     pub fn import(&mut self, path: &str, file: &str) -> Result<EditorView, String> {
         let item = media::probe(file)?.to_new_media();
         self.apply(path, Command::AddMedia { item })
+    }
+
+    /// [`Request::MontageImport`]: probe first, then apply one undoable batch.
+    pub fn import_montage(&mut self, path: &str, file: &str) -> Result<EditorView, String> {
+        let command = concat_host::montage::prepare(
+            std::path::Path::new(file),
+            self.session(path)?.project(),
+        )?
+        .command;
+        self.apply(path, command)
     }
 
     /// [`Request::TemplateInstantiate`].

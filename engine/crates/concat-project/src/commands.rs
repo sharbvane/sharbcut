@@ -264,6 +264,25 @@ pub enum Command {
         /// Timeline position in seconds, floored at 0.
         start: f64,
     },
+    /// Places an already-decided cut as an ordinary editable clip. The path
+    /// lets this follow AddMedia in one Batch without knowing its minted id.
+    AddClipSegment {
+        /// Path of media already in the bin (or added earlier in the batch).
+        media_path: String,
+        /// None chooses the first free lane for the segment's exact span.
+        track_id: Option<String>,
+        /// Timeline position in seconds.
+        start: f64,
+        /// In-point in the source file, in seconds.
+        source_start: f64,
+        /// Occupied timeline seconds.
+        duration: f64,
+        /// Source seconds per timeline second.
+        speed: f64,
+        /// Optional gain, fades, transition and crop, applied like UpdateClip.
+        #[serde(default)]
+        patch: ClipPatch,
+    },
     /// Places a title: a clip with no media behind it, named after the
     /// text's first line, minting a "c" id.
     AddTextClip {
@@ -640,6 +659,9 @@ pub enum CommandError {
     /// A first-free-track placement found a timeline with no tracks at all.
     #[error("There are no tracks.")]
     NoTracks,
+    /// A decided cut contains non-finite or out-of-range timing/speed.
+    #[error("This clip segment has invalid timing or speed.")]
+    InvalidSegment,
     /// [`Command::MergeClips`] was refused, for whichever [`why_not_merge`]
     /// reason applied.
     #[error("{reason}")]
@@ -1037,6 +1059,62 @@ pub fn apply(
             timeline
                 .clips
                 .push(default_clip(id.clone(), track_id, &media, start));
+            Ok(Outcome {
+                created_id: Some(id),
+                applied: true,
+            })
+        }
+
+        Command::AddClipSegment {
+            media_path,
+            track_id,
+            start,
+            source_start,
+            duration,
+            speed,
+            patch,
+        } => {
+            if !start.is_finite()
+                || start < 0.0
+                || !source_start.is_finite()
+                || source_start < 0.0
+                || !duration.is_finite()
+                || duration < MIN_CLIP_DURATION
+                || !speed.is_finite()
+                || !(MIN_SPEED..=MAX_SPEED).contains(&speed)
+                || !(start + duration).is_finite()
+                || !(source_start + duration * speed).is_finite()
+            {
+                return Err(CommandError::InvalidSegment);
+            }
+            let media = project
+                .media
+                .iter()
+                .find(|item| item.path == media_path)
+                .ok_or(CommandError::MediaGone)?
+                .clone();
+            let timeline = project.active_mut();
+            let track_id = match track_id {
+                Some(id) if timeline.track(&id).is_some() => id,
+                Some(_) => return Err(CommandError::TrackGone),
+                None => {
+                    first_free_track(timeline, start, duration).ok_or(CommandError::NoTracks)?
+                }
+            };
+            let id = mint.next("c");
+            let mut clip = default_clip(id.clone(), track_id, &media, start);
+            clip.source_start = source_start;
+            clip.duration = duration;
+            clip.speed = speed;
+            timeline.clips.push(clip);
+            apply(
+                project,
+                mint,
+                Command::UpdateClip {
+                    clip_id: id.clone(),
+                    patch,
+                },
+            )?;
             Ok(Outcome {
                 created_id: Some(id),
                 applied: true,

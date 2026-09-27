@@ -27,6 +27,7 @@ import { ModelData, SettingsData, SettingsDialog, SystemFactData } from "dialogs
 import { ProjectDialog, ProjectSheetData } from "dialogs/project.slint";
 import { CaptionsDialog, CaptionsSheetData } from "dialogs/captions.slint";
 import { SpeechDialog, SpeechSheetData } from "dialogs/speech.slint";
+import { AgentData, AgentDialog } from "dialogs/agent.slint";
 import { DockDivider, DockSide, SeatBox } from "dock.slint";
 import { Editor } from "editor.slint";
 import { PaneKind } from "workspace/pane-switcher.slint";
@@ -55,7 +56,7 @@ export {
     SelectedClipData, StageGuideData, StageItemData, TextAlignment, TimelineTabData,
     TimelineTool, TrackData, TrackSize, MenuItemData, MenuRow, ExportData, ExportPhase, ModelData, SettingsData,
     RecentProjectData, StartData, SystemFactData, ToastData, ProjectSheetData,
-    CaptionsSheetData, SpeechSheetData,
+    CaptionsSheetData, SpeechSheetData, AgentData,
 }
 
 export component App inherits Window {
@@ -91,7 +92,7 @@ export component App inherits Window {
             keys.focus();
         }
     }
-    property <bool> sheet-open: root.export.open || root.settings.open
+    property <bool> sheet-open: root.export.open || root.settings.open || root.agent.open
         || root.project-sheet.open || root.captions.open || root.speech.open;
     changed sheet-open => {
         if (!root.sheet-open) {
@@ -192,7 +193,18 @@ export component App inherits Window {
     callback model-remove(id: string);
 
     callback open-settings();
+    callback open-agent();
     callback export-clicked();
+
+    in property <AgentData> agent;
+    callback agent-closed();
+    callback agent-prompt-edited(text: string);
+    callback agent-base-url-edited(text: string);
+    callback agent-model-edited(text: string);
+    callback agent-key-edited(text: string);
+    callback agent-save-config();
+    callback agent-clear-key();
+    callback agent-send();
 
     /// The project sheet, opened from the Details panel.
     in property <ProjectSheetData> project-sheet;
@@ -391,6 +403,7 @@ export component App inherits Window {
                 minimize => { root.titlebar-minimize(); }
                 close => { root.titlebar-close(); }
                 open-settings => { root.open-settings(); }
+                open-agent => { root.open-agent(); }
                 add-pane(kind) => { Editor.dock-add(kind); }
                 export-clicked => { root.export-clicked(); }
             }
@@ -517,6 +530,22 @@ export component App inherits Window {
         pace-changed(index) => { root.speech-pace-changed(index); }
         begin => { root.speech-begin(); }
         cancel => { root.speech-cancel(); }
+    }
+
+    AgentDialog {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        data: root.agent;
+        closed => { root.agent-closed(); }
+        prompt-edited(text) => { root.agent-prompt-edited(text); }
+        base-url-edited(text) => { root.agent-base-url-edited(text); }
+        model-edited(text) => { root.agent-model-edited(text); }
+        key-edited(text) => { root.agent-key-edited(text); }
+        save-config => { root.agent-save-config(); }
+        clear-key => { root.agent-clear-key(); }
+        send => { root.agent-send(); }
     }
 
     // Over the workspace and both sheets, under the menus. A tooltip has to

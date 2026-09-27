@@ -144,6 +144,14 @@ pub enum Request {
         /// The file to import.
         file: String,
     },
+    /// Import source-backed BGM montage decisions onto the current timeline.
+    #[serde(rename = "montage.import")]
+    MontageImport {
+        /// The open project folder.
+        path: String,
+        /// An edit_decisions.json file.
+        file: String,
+    },
 
     /// Every effect package the build knows, with its parameters, so a
     /// caller can build a valid chain without reading a manifest.

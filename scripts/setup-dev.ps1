@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$RustDistServer = 'https://rsproxy.cn',
-    [string]$CargoRegistryIndex = 'sparse+https://rsproxy.cn/index/'
+    [string]$CargoRegistryIndex = 'sparse+https://rsproxy.cn/index/',
+    [switch]$SkipMontage
 )
 
 $ErrorActionPreference = 'Stop'
@@ -136,3 +137,4 @@ $env:Path = "$rustBin;$($cmakeRoot + '\bin');$(Split-Path -Parent $libclang);$($
 & cmake --version | Select-Object -First 1
 & cl 2>&1 | Select-Object -First 1
 Write-Host "Environment ready. Run: Set-Location '$repoRoot\engine'; cargo check -p concat --locked"
+if (-not $SkipMontage) { & (Join-Path $PSScriptRoot 'setup-bgm.ps1') }
