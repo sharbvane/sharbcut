@@ -125,6 +125,8 @@ $env:SHARBCUT_RELEASE = $release
 & $iscc /Qp (Join-Path $PSScriptRoot 'sharbcut-installer.iss')
 if ($LASTEXITCODE -ne 0) { throw 'SharbCut installer build failed.' }
 if (-not $SkipZip) {
+    # Only the ZIP keeps settings and downloaded models beside the executable.
+    New-Item -ItemType Directory -Force -Path (Join-Path $stage 'portable') | Out-Null
     Compress-Archive -LiteralPath $stage -DestinationPath (Join-Path $release 'SharbCut-Windows-x64.zip') -CompressionLevel Optimal -Force
 }
 Write-Host "Windows release ready: $(Join-Path $release 'SharbCutSetup.exe')"
