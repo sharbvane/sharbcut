@@ -1603,24 +1603,29 @@ impl Studio {
 
     // ── changing the edit ──
 
-    /// Applies one command to the session and reports the id it minted.
-    /// A refusal becomes a notice; the echo, if any, is dropped either way,
-    /// because the session's project is the truth again.
+    /// Applies one command and returns its minted id, if any. `None` also
+    /// covers successful edits that do not create a new object.
     pub fn apply(&mut self, command: Command) -> Option<String> {
+        self.try_apply(command).ok().flatten()
+    }
+
+    /// A refusal becomes a notice; the echo is dropped either way because
+    /// the session's project is the truth again.
+    fn try_apply(&mut self, command: Command) -> Result<Option<String>, String> {
         self.flush_commit();
         self.echo = None;
         // Anything but an inspector commit ends the coalescing window; the
         // commit path sets `last_commit` again right after calling here.
         self.last_commit = None;
-        let session = self.session.as_mut()?;
+        let session = self.session.as_mut().ok_or("No project open")?;
         match session.apply(command) {
             Ok(view) => {
                 self.after_change();
-                view.created_id
+                Ok(view.created_id)
             }
             Err(error) => {
                 self.notify(&error, true);
-                None
+                Err(error)
             }
         }
     }
@@ -2201,7 +2206,7 @@ impl Studio {
                         );
                         return;
                     }
-                    if studio.apply(prepared.command).is_some() {
+                    if studio.try_apply(prepared.command).is_ok() {
                         studio.notify(&tf("Imported {0} montage cuts", &[&prepared.shots]), false);
                     }
                 }
@@ -2437,7 +2442,7 @@ impl Studio {
                             return;
                         }
                         if let Some(command) = plan.command {
-                            if studio.apply(command).is_none() {
+                            if studio.try_apply(command).is_err() {
                                 studio
                                     .agent
                                     .transcript

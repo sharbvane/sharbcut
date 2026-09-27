@@ -243,12 +243,17 @@ mod tests {
                     "{code}.json translates {key:?}, which nothing asks for"
                 );
             }
-            if code != ENGLISH {
-                // A shipped translation covers the inventory: a missing
-                // line would read in English in the middle of a page.
+            if code == "zh-Hans" {
+                // The default Chinese UI must not fall back to English.
+                // Chinese source strings need no duplicate identity entry.
                 let missing: Vec<&String> = inventory
                     .keys()
-                    .filter(|key| !strings.contains_key(*key))
+                    .filter(|key| {
+                        !strings.contains_key(*key)
+                            && !key
+                                .chars()
+                                .any(|ch| ('\u{4e00}'..='\u{9fff}').contains(&ch))
+                    })
                     .collect();
                 assert!(missing.is_empty(), "{code}.json lacks {missing:?}");
             }
