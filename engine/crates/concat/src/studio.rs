@@ -2353,13 +2353,14 @@ impl Studio {
             api_key: key,
         };
         let project = session.project().clone();
+        let selected = self.selection.clone();
         let path = session.path().to_owned();
         let revision = self.revision;
         self.agent.transcript.push_str(&format!("你：{prompt}\n"));
         self.agent.prompt.clear();
         self.agent.busy = true;
         spawn(
-            move || agent::request(config, &context_prompt, &project),
+            move || agent::request(config, &context_prompt, &project, &selected),
             move |studio, _, _, result| {
                 studio.agent.busy = false;
                 match result {

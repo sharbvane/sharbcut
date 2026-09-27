@@ -7,10 +7,14 @@
 use std::io::Read;
 use std::path::PathBuf;
 
+use base64::Engine;
+use concat_media::{AudioDecoder, AudioOptions, SampleFormat};
 use concat_project::commands::{ClipPatch, Command, IdMint, apply};
-use concat_project::model::{MediaKind, Project, TextStyle};
+use concat_project::model::{MediaItem, MediaKind, Project, TextStyle};
 use serde::Deserialize;
 use serde_json::{Value, json};
+
+use crate::media;
 
 /// User-selected OpenAI-compatible endpoint and credential.
 pub struct Config {
@@ -67,7 +71,7 @@ fn montage_duration() -> f64 {
     30.0
 }
 
-const SYSTEM: &str = r#"You are SharbCut's timeline editing assistant. Reply with ONE JSON object only: {"reply":"short Chinese explanation","commands":[...]}. Commands are SharbCut's existing camelCase command format. Allowed ops: removeClips {clipIds}, splitClips {clipIds,time}, trimClip {clipId,edge:"start"|"end",delta}, moveClips {moves:[{clipId,start,trackId}]}, setClipSpeed {clipId,speed}, updateClip {clipId,patch:{volume?,fadeIn?,fadeOut?,transitionIn?}}, addClipSegment {mediaPath,trackId?,start,sourceStart,duration,speed,patch:{}}, addTextClip {trackId?,start,duration,style:{content}}. Use ONLY ids and media paths from the provided project. Times are seconds. To make a rough cut, remove existing clips and add source-backed segments in one response. To place a BGM already in the bin, use addClipSegment on its path, with an audio track. For a request to automatically cut footage to a BGM, return {"reply":"将使用 BMTS-lite 自动卡点","commands":[],"montage":{"bgmMediaId":"existing audio media id","videoMediaIds":["existing video media ids"],"duration":30}}. Omit videoMediaIds to use the imported videos; never include montage and commands together. Montage defaults to fast BMTS-lite, not full analysis. If the request is ambiguous or needs content analysis unavailable in the context, explain the limitation and return no commands. Never invent source files or claim to have seen/heard footage. No markdown fences."#;
+const SYSTEM: &str = r#"You are SharbCut's timeline editing assistant. Reply with ONE JSON object only: {"reply":"short Chinese explanation","commands":[...]}. Commands are SharbCut's existing camelCase command format. Allowed ops: removeClips {clipIds}, splitClips {clipIds,time}, trimClip {clipId,edge:"start"|"end",delta}, moveClips {moves:[{clipId,start,trackId}]}, setClipSpeed {clipId,speed}, updateClip {clipId,patch:{volume?,fadeIn?,fadeOut?,transitionIn?}}, addClipSegment {mediaPath,trackId?,start,sourceStart,duration,speed,patch:{}}, addTextClip {trackId?,start,duration,style:{content}}. Use ONLY ids and media paths from the provided project. Times are seconds. To make a rough cut, remove existing clips and add source-backed segments in one response. To place a BGM already in the bin, use addClipSegment on its path, with an audio track. For a request to automatically cut footage to a BGM, return {"reply":"将使用 BMTS-lite 自动卡点","commands":[],"montage":{"bgmMediaId":"existing audio media id","videoMediaIds":["existing video media ids"],"duration":30}}. Omit videoMediaIds to use the imported videos; never include montage and commands together. Montage defaults to fast BMTS-lite, not full analysis. Some requests include sparse labeled preview frames. Use only those frames as visual evidence; they do not show the whole video. Audio energy numbers indicate loudness, not speech or lyrics. Existing text clips may contain captions. If no previews are attached, do not claim to have seen the footage. If the request needs content analysis unavailable in the context, explain the limitation and return no commands. Never invent source files or claim to have heard speech. No markdown fences."#;
 
 fn validate(command: &Command, project: &Project) -> Result<(), String> {
     let timeline = project.active();
@@ -300,8 +304,140 @@ pub fn parse(content: &str, project: &Project) -> Result<Plan, String> {
     })
 }
 
+fn preview_parts(project: &Project, selected: &[String]) -> Vec<Value> {
+    let mut candidates: Vec<(&MediaItem, f64, String)> = project
+        .active()
+        .clips
+        .iter()
+        .filter(|clip| selected.contains(&clip.id) && clip.kind.is_visual())
+        .filter_map(|clip| {
+            project
+                .media
+                .iter()
+                .find(|item| item.id == clip.media_id)
+                .map(|item| {
+                    (
+                        item,
+                        if item.kind == MediaKind::Image {
+                            0.0
+                        } else {
+                            clip.source_start + clip.duration * clip.speed * 0.5
+                        },
+                        format!("clip {}", clip.id),
+                    )
+                })
+        })
+        .take(4)
+        .collect();
+    if candidates.is_empty() {
+        let visuals: Vec<_> = project
+            .media
+            .iter()
+            .filter(|item| {
+                matches!(item.kind, MediaKind::Video | MediaKind::Image)
+                    && !item.placeholder
+                    && !item.path.is_empty()
+            })
+            .collect();
+        let count = visuals.len().min(4);
+        for index in 0..count {
+            let item = visuals[index * visuals.len() / count];
+            let time = if item.kind == MediaKind::Image {
+                0.0
+            } else {
+                item.duration.unwrap_or(4.0) * 0.25
+            };
+            candidates.push((item, time, format!("media {}", item.id)));
+        }
+    }
+    let mut parts = Vec::new();
+    // ponytail: four sparse 320px frames bound latency and token cost; add deliberate deep analysis when needed.
+    for (item, time, label) in candidates {
+        if item.placeholder || item.path.is_empty() {
+            continue;
+        }
+        let time = if time.is_finite() { time.max(0.0) } else { 0.0 };
+        let Ok(frame) = media::still_at(&item.path, time, 320) else {
+            continue;
+        };
+        let Ok(jpeg) = concat_media::jpeg(&frame, 4) else {
+            continue;
+        };
+        if jpeg.len() > 128 * 1024 {
+            continue;
+        }
+        parts.push(json!({"type":"text","text":format!("Preview of {label} ({}, {:.1}s)", item.name, time)}));
+        parts.push(json!({"type":"image_url","image_url":{"url":format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(jpeg)),"detail":"low"}}));
+    }
+    parts
+}
+
+fn audio_levels(path: &str, start: f64, duration: f64, stream: Option<u32>) -> Option<Vec<f64>> {
+    if !start.is_finite() || start < 0.0 || !duration.is_finite() || duration < 0.2 {
+        return None;
+    }
+    let mut decoder = AudioDecoder::open(
+        path,
+        &AudioOptions {
+            start: Some(start),
+            duration: Some(duration.min(15.0)),
+            rate: 8_000,
+            channels: 1,
+            format: SampleFormat::F32,
+            stream: stream.map(|index| index as usize),
+            ..AudioOptions::default()
+        },
+    )
+    .ok()?;
+    let samples = decoder.collect_f32().ok()?;
+    if samples.is_empty() {
+        return None;
+    }
+    Some(
+        samples
+            .chunks(16_000)
+            .map(|chunk| {
+                let power = chunk
+                    .iter()
+                    .map(|sample| f64::from(*sample).powi(2))
+                    .sum::<f64>()
+                    / chunk.len() as f64;
+                (power.sqrt() * 1000.0).round() / 1000.0
+            })
+            .collect(),
+    )
+}
+
+fn selected_audio(project: &Project, selected: &[String]) -> Vec<Value> {
+    project
+        .active()
+        .clips
+        .iter()
+        .filter(|clip| selected.contains(&clip.id))
+        .filter_map(|clip| {
+            let item = project.media.iter().find(|item| item.id == clip.media_id)?;
+            if !item.has_audio || item.placeholder {
+                return None;
+            }
+            let levels = audio_levels(
+                &item.path,
+                clip.source_start,
+                clip.duration * clip.speed,
+                clip.audio_stream,
+            )?;
+            Some(json!({"clipId":clip.id,"sourceStart":clip.source_start,"bucketSeconds":2,"rms":levels}))
+        })
+        .take(2)
+        .collect()
+}
+
 /// Ask the configured model to edit the current timeline off the UI thread.
-pub fn request(config: Config, prompt: &str, project: &Project) -> Result<Plan, String> {
+pub fn request(
+    config: Config,
+    prompt: &str,
+    project: &Project,
+    selected: &[String],
+) -> Result<Plan, String> {
     let base = config.base_url.trim().trim_end_matches('/');
     let local_http = base.strip_prefix("http://").is_some_and(|rest| {
         let host = rest.split('/').next().unwrap_or_default();
@@ -316,23 +452,43 @@ pub fn request(config: Config, prompt: &str, project: &Project) -> Result<Plan, 
         return Err("Configure a model and enter an editing request.".to_owned());
     }
     let timeline = project.active();
+    let audio = selected_audio(project, selected);
     let context = json!({
         "media": project.media.iter().map(|item| json!({"id":item.id,"name":item.name,"path":item.path,"duration":item.duration,"kind":item.kind,"hasAudio":item.has_audio})).collect::<Vec<_>>(),
-        "timeline": {"id":timeline.id,"name":timeline.name,"video":timeline.video,"tracks":timeline.tracks,"clips":timeline.clips.iter().map(|clip| json!({"id":clip.id,"name":clip.name,"mediaId":clip.media_id,"trackId":clip.track_id,"start":clip.start,"duration":clip.duration,"sourceStart":clip.source_start,"speed":clip.speed,"volume":clip.volume,"kind":clip.kind})).collect::<Vec<_>>()},
+        "timeline": {"id":timeline.id,"name":timeline.name,"video":timeline.video,"tracks":timeline.tracks,"clips":timeline.clips.iter().map(|clip| json!({"id":clip.id,"name":clip.name,"mediaId":clip.media_id,"trackId":clip.track_id,"start":clip.start,"duration":clip.duration,"sourceStart":clip.source_start,"speed":clip.speed,"volume":clip.volume,"kind":clip.kind,"text":clip.text.as_ref().map(|style| &style.content),"transitionIn":clip.transition_in,"fadeIn":clip.fade_in,"fadeOut":clip.fade_out})).collect::<Vec<_>>()},
+        "audioEnergy": audio,
     });
-    let body = json!({"model":config.model,"temperature":0.2,"messages":[{"role":"system","content":SYSTEM},{"role":"user","content":format!("Current project: {context}\nUser request: {prompt}")}]});
+    let message = format!("Current project: {context}\nUser request: {prompt}");
+    let text_body = json!({"model":config.model,"temperature":0.2,"messages":[{"role":"system","content":SYSTEM},{"role":"user","content":message}]});
+    let previews = preview_parts(project, selected);
+    let body = if previews.is_empty() {
+        text_body.clone()
+    } else {
+        let mut content = vec![json!({"type":"text","text":message})];
+        content.extend(previews);
+        json!({"model":config.model,"temperature":0.2,"messages":[{"role":"system","content":SYSTEM},{"role":"user","content":content}]})
+    };
     let url = format!("{base}/chat/completions");
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(std::time::Duration::from_secs(15))
         .timeout_read(std::time::Duration::from_secs(90))
         .build();
-    let mut call = agent.post(&url).set("Content-Type", "application/json");
-    if !config.api_key.is_empty() {
-        call = call.set("Authorization", &format!("Bearer {}", config.api_key));
-    }
-    let response = call
-        .send_string(&body.to_string())
-        .map_err(|error| format!("AI request failed: {error}"))?;
+    let post = |body: &Value| {
+        let mut call = agent.post(&url).set("Content-Type", "application/json");
+        if !config.api_key.is_empty() {
+            call = call.set("Authorization", &format!("Bearer {}", config.api_key));
+        }
+        call.send_string(&body.to_string())
+    };
+    let response = match post(&body) {
+        Ok(response) => response,
+        Err(ureq::Error::Status(status, _))
+            if body != text_body && [400, 413, 415, 422].contains(&status) =>
+        {
+            post(&text_body).map_err(|error| format!("AI request failed: {error}"))?
+        }
+        Err(error) => return Err(format!("AI request failed: {error}")),
+    };
     let mut bytes = Vec::new();
     response
         .into_reader()
@@ -437,6 +593,92 @@ mod tests {
     }
 
     #[test]
+    fn real_video_preview_is_labeled_and_bounded() {
+        use std::io::{BufRead, BufReader, Read, Write};
+
+        let Ok(path) = std::env::var("SHARBCUT_AGENT_TEST_VIDEO") else {
+            return;
+        };
+        let mut project = Project::new();
+        project.media.push(
+            serde_json::from_value(json!({
+                "id":"m1","path":path,"name":"test video","duration":12,
+                "kind":"video","hasAudio":false
+            }))
+            .expect("video"),
+        );
+        let parts = preview_parts(&project, &[]);
+        assert_eq!(parts.len(), 2);
+        assert!(parts[0]["text"].as_str().unwrap().contains("media m1"));
+        assert!(
+            parts[1]["image_url"]["url"]
+                .as_str()
+                .unwrap()
+                .starts_with("data:image/jpeg;base64,/9j/")
+        );
+        let server = std::net::TcpListener::bind("127.0.0.1:0").expect("loopback");
+        let address = server.local_addr().expect("address");
+        let worker = std::thread::spawn(move || {
+            for image_expected in [true, false] {
+                let (stream, _) = server.accept().expect("request");
+                let mut stream = BufReader::new(stream);
+                let mut line = String::new();
+                stream.read_line(&mut line).expect("request line");
+                let mut length = 0;
+                loop {
+                    line.clear();
+                    stream.read_line(&mut line).expect("header");
+                    if line == "\r\n" {
+                        break;
+                    }
+                    if let Some((name, value)) = line.split_once(':')
+                        && name.eq_ignore_ascii_case("content-length")
+                    {
+                        length = value.trim().parse().expect("length");
+                    }
+                }
+                let mut request = vec![0; length];
+                stream.read_exact(&mut request).expect("body");
+                let request: Value = serde_json::from_slice(&request).expect("json body");
+                assert_eq!(request["messages"][1]["content"].is_array(), image_expected);
+                let (status, body) = if image_expected {
+                    ("400 Bad Request", "{}".to_owned())
+                } else {
+                    ("200 OK", json!({"choices":[{"message":{"content":r#"{"reply":"fallback","commands":[]}"#}}]}).to_string())
+                };
+                write!(stream.get_mut(), "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).expect("response");
+            }
+        });
+        let plan = request(
+            Config {
+                base_url: format!("http://{address}/v1"),
+                model: "mock".into(),
+                api_key: String::new(),
+            },
+            "描述画面",
+            &project,
+            &[],
+        )
+        .expect("text fallback");
+        worker.join().expect("server");
+        assert_eq!(plan.reply, "fallback");
+    }
+
+    #[test]
+    fn real_audio_energy_is_bounded() {
+        let Ok(path) = std::env::var("SHARBCUT_AGENT_TEST_AUDIO") else {
+            return;
+        };
+        let levels = audio_levels(&path, 0.0, 5.0, None).expect("audio levels");
+        assert!(!levels.is_empty() && levels.len() <= 3);
+        assert!(
+            levels
+                .iter()
+                .all(|value| value.is_finite() && *value >= 0.0)
+        );
+    }
+
+    #[test]
     fn openai_compatible_request_returns_checked_edit() {
         use std::io::{BufRead, BufReader, Read, Write};
 
@@ -475,6 +717,7 @@ mod tests {
             },
             "添加文字",
             &Project::new(),
+            &[],
         )
         .expect("model edit");
         worker.join().expect("server");

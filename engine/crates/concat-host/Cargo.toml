@@ -27,6 +27,7 @@ ureq = "2"
 concat-render.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
+base64 = "0.22"
 
 # Engine-owned audio playback: cpal talks to the output device, memmap2 keeps
 # decoded PCM disk-backed instead of resident.
