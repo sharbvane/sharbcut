@@ -73,7 +73,7 @@ fn montage_duration() -> f64 {
     30.0
 }
 
-const SYSTEM: &str = r#"You are SharbCut's timeline editing assistant. Reply with ONE JSON object only: {"reply":"short Chinese explanation","commands":[...]}. Commands are SharbCut's existing camelCase command format. Allowed ops: removeClips {clipIds}, splitClips {clipIds,time}, trimClip {clipId,edge:"start"|"end",delta}, moveClips {moves:[{clipId,start,trackId}]}, setClipSpeed {clipId,speed}, updateClip {clipId,patch:{volume?,fadeIn?,fadeOut?,transitionIn?}}, addClipSegment {mediaPath,trackId?,start,sourceStart,duration,speed,patch:{}}, addTextClip {trackId?,start,duration,style:{content}}. Use ONLY ids and media paths from the provided project. Times are seconds. To make a rough cut, remove existing clips and add source-backed segments in one response. To place a BGM already in the bin, use addClipSegment on its path, with an audio track. For a request to automatically cut footage to a BGM, return {"reply":"将使用 BMTS-lite 自动卡点","commands":[],"montage":{"bgmMediaId":"existing audio media id","videoMediaIds":["existing video media ids"],"duration":30}}. Omit videoMediaIds to use the imported videos; never include montage and commands together. Montage defaults to fast BMTS-lite, not full analysis. Some requests include sparse labeled preview frames. Use only those frames as visual evidence; they do not show the whole video. Audio energy numbers indicate loudness, not speech or lyrics. An audio transcript, when provided, covers only the first 15 seconds of one selected clip and may contain recognition errors. Existing text clips may contain captions. If no previews are attached, do not claim to have seen the footage. If the request needs content analysis unavailable in the context, explain the limitation and return no commands. Never invent source files or claim to have heard speech not present in a transcript. No markdown fences."#;
+const SYSTEM: &str = r#"You are SharbCut's timeline editing assistant. Reply with ONE JSON object only: {"reply":"short Chinese explanation","commands":[...]}. Commands are SharbCut's existing camelCase command format. Allowed ops: removeClips {clipIds}, splitClips {clipIds,time}, trimClip {clipId,edge:"start"|"end",delta}, moveClips {moves:[{clipId,start,trackId}]}, setClipSpeed {clipId,speed}, updateClip {clipId,patch:{volume?,fadeIn?,fadeOut?,transitionIn?:{id:"cross-fade"|"fade-black"|"fade-white"|"push"|"zoom"|"wipe-left"|"wipe-right",duration:seconds}}}, addClipSegment {mediaPath,trackId?,start,sourceStart,duration,speed,patch:{}}, addTextClip {trackId?,start,duration,style:{content}}. Use ONLY ids and media paths from the provided project. Times are seconds. To make a rough cut, remove existing clips and add source-backed segments in one response. To place a BGM already in the bin, use addClipSegment on its path, with an audio track. For a request to automatically cut footage to a BGM, return {"reply":"将使用 BMTS-lite 自动卡点","commands":[],"montage":{"bgmMediaId":"existing audio media id","videoMediaIds":["existing video media ids"],"duration":30}}. Omit videoMediaIds to use the imported videos; never include montage and commands together. Montage defaults to fast BMTS-lite, not full analysis. Some requests include sparse labeled preview frames. Use only those frames as visual evidence; they do not show the whole video. Audio energy numbers indicate loudness, not speech or lyrics. An audio transcript, when provided, covers only the first 15 seconds of one selected clip and may contain recognition errors. Existing text clips may contain captions. If no previews are attached, do not claim to have seen the footage. If the request needs content analysis unavailable in the context, explain the limitation and return no commands. Never invent source files or claim to have heard speech not present in a transcript. No markdown fences."#;
 
 fn validate(command: &Command, project: &Project) -> Result<(), String> {
     let timeline = project.active();
@@ -462,7 +462,9 @@ pub fn request(
         "audioEnergy": audio,
         "audioTranscript": transcript,
     });
-    let message = format!("Current project: {context}\nUser request: {prompt}");
+    let message = format!(
+        "Current project: {context}\nTrim rule: trimClip delta moves an edge to the right when positive. To shorten the tail use a negative delta; to shorten the head use a positive delta.\nUser request: {prompt}"
+    );
     let mut text_body = json!({"model":config.model,"messages":[{"role":"system","content":SYSTEM},{"role":"user","content":message}]});
     let previews = preview_parts(project, selected);
     let mut body = if previews.is_empty() {
@@ -491,12 +493,19 @@ pub fn request(
         }
         call.send_string(&body.to_string())
     };
-    let response = match post(&body) {
+    let post_retry = |body: &Value| match post(body) {
+        Err(ureq::Error::Status(status, _)) if [502, 503, 504].contains(&status) => {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            post(body)
+        }
+        result => result,
+    };
+    let response = match post_retry(&body) {
         Ok(response) => response,
         Err(ureq::Error::Status(status, _))
             if body != text_body && [400, 413, 415, 422].contains(&status) =>
         {
-            post(&text_body).map_err(|error| format!("AI request failed: {error}"))?
+            post_retry(&text_body).map_err(|error| format!("AI request failed: {error}"))?
         }
         Err(error) => return Err(format!("AI request failed: {error}")),
     };
@@ -633,6 +642,235 @@ mod tests {
     }
 
     #[test]
+    fn live_model_reedits_bmts_timeline() {
+        let (Ok(base_url), Ok(model), Ok(api_key), Ok(plan_path)) = (
+            std::env::var("SHARBCUT_AGENT_TEST_BASE_URL"),
+            std::env::var("SHARBCUT_AGENT_TEST_MODEL"),
+            std::env::var("SHARBCUT_AGENT_TEST_API_KEY"),
+            std::env::var("SHARBCUT_AGENT_TEST_PLAN"),
+        ) else {
+            return;
+        };
+        let mut editor = concat_project::Editor::new();
+        let montage = crate::montage::prepare(std::path::Path::new(&plan_path), editor.project())
+            .expect("real BMTS plan");
+        editor.apply(montage.command).expect("import BMTS edit");
+        let clip = editor
+            .project()
+            .active()
+            .clips
+            .iter()
+            .find(|clip| clip.kind == concat_project::model::ClipKind::Video)
+            .expect("video cut")
+            .clone();
+        let edit = |editor: &mut concat_project::Editor, selected_id: &str, prompt: String| {
+            let before = editor.project().clone();
+            let plan = request(
+                Config {
+                    base_url: base_url.clone(),
+                    model: model.clone(),
+                    api_key: api_key.clone(),
+                    reasoning_effort: Some("max".to_owned()),
+                },
+                &prompt,
+                editor.project(),
+                &[selected_id.to_owned()],
+                None,
+            )
+            .unwrap_or_else(|error| panic!("{prompt}: {error}"));
+            editor
+                .apply(plan.command.expect("timeline edit"))
+                .expect("apply");
+            assert!(editor.undo());
+            assert_eq!(editor.project(), &before);
+            assert!(editor.redo());
+        };
+        let count = editor.project().active().clips.len();
+        edit(
+            &mut editor,
+            &clip.id,
+            format!(
+                "只把片段 {} 在时间线 {:.3} 秒处分割，不做其他修改。",
+                clip.id,
+                clip.start + clip.duration * 0.5
+            ),
+        );
+        assert_eq!(editor.project().active().clips.len(), count + 1);
+        edit(
+            &mut editor,
+            &clip.id,
+            format!("只把片段 {} 的速度改成 2 倍，不做其他修改。", clip.id),
+        );
+        assert_eq!(
+            editor
+                .project()
+                .active()
+                .clips
+                .iter()
+                .find(|item| item.id == clip.id)
+                .unwrap()
+                .speed,
+            2.0
+        );
+        edit(
+            &mut editor,
+            &clip.id,
+            format!("只把片段 {} 移到时间线 6 秒处，不做其他修改。", clip.id),
+        );
+        assert_eq!(
+            editor
+                .project()
+                .active()
+                .clips
+                .iter()
+                .find(|item| item.id == clip.id)
+                .unwrap()
+                .start,
+            6.0
+        );
+        edit(
+            &mut editor,
+            &clip.id,
+            format!("只删除片段 {}，不要删除素材库文件。", clip.id),
+        );
+        assert!(
+            !editor
+                .project()
+                .active()
+                .clips
+                .iter()
+                .any(|item| item.id == clip.id)
+        );
+        let next = editor
+            .project()
+            .active()
+            .clips
+            .iter()
+            .find(|item| item.kind == concat_project::model::ClipKind::Video)
+            .expect("remaining video cut")
+            .clone();
+        edit(
+            &mut editor,
+            &next.id,
+            format!("只将片段 {} 的尾部缩短 0.1 秒，不做其他修改。", next.id),
+        );
+        let trimmed = editor
+            .project()
+            .active()
+            .clips
+            .iter()
+            .find(|item| item.id == next.id)
+            .unwrap();
+        assert!(
+            (trimmed.duration - (next.duration - 0.1)).abs() < 0.01,
+            "trimmed from {} to {}",
+            next.duration,
+            trimmed.duration
+        );
+        edit(
+            &mut editor,
+            &next.id,
+            format!(
+                "只给片段 {} 添加 0.15 秒交叉淡化转场，不做其他修改。",
+                next.id
+            ),
+        );
+        let transitioned = editor
+            .project()
+            .active()
+            .clips
+            .iter()
+            .find(|item| item.id == next.id)
+            .unwrap();
+        assert_eq!(
+            transitioned.transition_in.as_ref().unwrap().id,
+            "cross-fade"
+        );
+        assert!((transitioned.transition_in.as_ref().unwrap().duration - 0.15).abs() < 0.001);
+        let music = editor
+            .project()
+            .active()
+            .clips
+            .iter()
+            .find(|item| item.kind == concat_project::model::ClipKind::Audio)
+            .expect("BGM cut")
+            .id
+            .clone();
+        edit(
+            &mut editor,
+            &music,
+            format!("只把背景音乐片段 {} 的音量调到 30%，不做其他修改。", music),
+        );
+        let bgm = editor
+            .project()
+            .active()
+            .clips
+            .iter()
+            .find(|item| item.id == music)
+            .unwrap();
+        assert!((bgm.volume - 0.3).abs() < 0.001);
+    }
+
+    #[test]
+    fn live_model_rough_cuts_real_media() {
+        let (Ok(base_url), Ok(model), Ok(api_key), Ok(video_a), Ok(video_b)) = (
+            std::env::var("SHARBCUT_AGENT_TEST_BASE_URL"),
+            std::env::var("SHARBCUT_AGENT_TEST_MODEL"),
+            std::env::var("SHARBCUT_AGENT_TEST_API_KEY"),
+            std::env::var("SHARBCUT_AGENT_TEST_VIDEO"),
+            std::env::var("SHARBCUT_AGENT_TEST_VIDEO_2"),
+        ) else {
+            return;
+        };
+        let mut editor = concat_project::Editor::new();
+        for path in [&video_a, &video_b] {
+            editor
+                .apply(Command::AddMedia {
+                    item: media::probe(path).expect("real video probe").to_new_media(),
+                })
+                .expect("import video");
+        }
+        let before = editor.project().clone();
+        let plan = request(
+            Config {
+                base_url,
+                model,
+                api_key,
+                reasoning_effort: Some("max".to_owned()),
+            },
+            "素材库有两条视频，时间线还是空的。各取至少一段，把它们粗剪成总长约 3 秒的可编辑时间线；不要生成最终视频文件，也不要自动卡点。",
+            editor.project(),
+            &[],
+            None,
+        )
+        .expect("live rough cut");
+        editor
+            .apply(plan.command.expect("rough cut edits"))
+            .expect("apply");
+        let timeline = editor.project().active();
+        assert!(timeline.clips.len() >= 2);
+        let end = timeline
+            .clips
+            .iter()
+            .map(|clip| clip.start + clip.duration)
+            .fold(0.0_f64, f64::max);
+        assert!((2.0..=4.0).contains(&end), "rough cut ends at {end}");
+        assert!(
+            timeline
+                .clips
+                .iter()
+                .map(|clip| clip.media_id.as_str())
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                >= 2
+        );
+        assert!(editor.undo());
+        assert_eq!(editor.project(), &before);
+        assert!(editor.redo());
+        assert!(editor.project().active().clips.len() >= 2);
+    }
+
+    #[test]
     fn only_undoable_timeline_edits_cross_model_boundary() {
         let project = Project::new();
         let text = r#"{"reply":"已添加文字","commands":[{"op":"addTextClip","trackId":"T1","start":0,"duration":2,"style":{"content":"你好"}}]}"#;
@@ -743,7 +981,7 @@ mod tests {
         let server = std::net::TcpListener::bind("127.0.0.1:0").expect("loopback");
         let address = server.local_addr().expect("address");
         let worker = std::thread::spawn(move || {
-            for image_expected in [true, false] {
+            for (index, image_expected) in [true, true, false].into_iter().enumerate() {
                 let (stream, _) = server.accept().expect("request");
                 let mut stream = BufReader::new(stream);
                 let mut line = String::new();
@@ -765,7 +1003,9 @@ mod tests {
                 stream.read_exact(&mut request).expect("body");
                 let request: Value = serde_json::from_slice(&request).expect("json body");
                 assert_eq!(request["messages"][1]["content"].is_array(), image_expected);
-                let (status, body) = if image_expected {
+                let (status, body) = if index == 0 {
+                    ("502 Bad Gateway", "{}".to_owned())
+                } else if image_expected {
                     ("400 Bad Request", "{}".to_owned())
                 } else {
                     ("200 OK", json!({"choices":[{"message":{"content":r#"{"reply":"fallback","commands":[]}"#}}]}).to_string())
