@@ -684,7 +684,7 @@ mod tests {
             Reply::Projects(list) => list,
             _ => panic!("not a list"),
         };
-        assert_eq!(recents.len(), 1);
+        assert_eq!(recents.len(), 1, "recents: {recents:#?}");
         assert_eq!(recents[0].name, "Round trip");
     }
 

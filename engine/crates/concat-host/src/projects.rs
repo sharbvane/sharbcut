@@ -280,7 +280,14 @@ fn write_recents(config: &Path, entries: &[ProjectInfo]) -> Result<(), String> {
 
 /// Compares paths case-insensitively, because Windows does.
 fn same_path(left: &str, right: &str) -> bool {
-    left.eq_ignore_ascii_case(right)
+    left.len() == right.len()
+        && left
+            .bytes()
+            .zip(right.bytes())
+            .all(|(left, right)| match (left, right) {
+                (b'/' | b'\\', b'/' | b'\\') => true,
+                _ => left.eq_ignore_ascii_case(&right),
+            })
 }
 
 /// Turns a project name into something a filesystem will accept. Also used
@@ -410,6 +417,7 @@ mod tests {
     #[test]
     fn paths_compare_case_insensitively() {
         assert!(same_path("D:\\Work\\Film", "d:\\work\\film"));
+        assert!(same_path("E:\\Work/Film", "e:/work\\film"));
         assert!(!same_path("D:\\Work\\Film", "D:\\Work\\Other"));
     }
 }
