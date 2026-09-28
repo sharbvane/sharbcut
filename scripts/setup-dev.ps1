@@ -135,6 +135,6 @@ $env:Path = "$rustBin;$($cmakeRoot + '\bin');$(Split-Path -Parent $libclang);$($
 
 & cargo --version
 & cmake --version | Select-Object -First 1
-& cl 2>&1 | Select-Object -First 1
+Write-Host "MSVC compiler: $((Get-Command cl -ErrorAction Stop).Source)"
 Write-Host "Environment ready. Run: Set-Location '$repoRoot\engine'; cargo check -p concat --locked"
 if (-not $SkipMontage) { & (Join-Path $PSScriptRoot 'setup-bgm.ps1') }
