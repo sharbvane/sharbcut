@@ -1293,6 +1293,7 @@ dependencies = [
  "concat-media",
  "serde",
  "serde_json",
+ "sha1",
  "sherpa-onnx",
  "tar",
  "ureq 2.12.1",

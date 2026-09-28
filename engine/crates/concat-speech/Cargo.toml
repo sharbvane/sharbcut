@@ -16,6 +16,7 @@ serde_json.workspace = true
 # and an async HTTP stack would be a second runtime's worth of dependencies
 # for one GET.
 ureq = "2"
+sha1 = "0.10"
 
 # Kokoro models arrive as tar.bz2 archives, hence tar + bzip2 (pure-Rust
 # decoder) for unpacking them.

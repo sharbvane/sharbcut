@@ -19,13 +19,15 @@
 //!    window as 16 kHz mono floats - the input whisper wants - and the
 //!    segments come back relative to the window.
 
-use std::path::PathBuf;
-use std::sync::atomic::Ordering;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use concat_host::{AppDirs, SingleFlight};
 use concat_media::{AudioDecoder, AudioOptions, SampleFormat};
 use serde::{Deserialize, Serialize};
+use sha1::{Digest, Sha1};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 use crate::DownloadProgress;
@@ -38,6 +40,7 @@ struct KnownModel {
     /// One line for the settings row: what this size trades away.
     blurb: &'static str,
     approx_bytes: u64,
+    sha1: &'static str,
     english_only: bool,
 }
 
@@ -52,6 +55,7 @@ const KNOWN_MODELS: &[KnownModel] = &[
         label: "Tiny (English)",
         blurb: "Fastest draft. Rough on names and punctuation.",
         approx_bytes: 77_700_000,
+        sha1: "c78c86eb1a8faa21b369bcd33207cc90d64ae9df",
         english_only: true,
     },
     KnownModel {
@@ -59,6 +63,7 @@ const KNOWN_MODELS: &[KnownModel] = &[
         label: "Tiny (Multilingual)",
         blurb: "Fastest draft, any language.",
         approx_bytes: 77_700_000,
+        sha1: "bd577a113a864445d4c299885e0cb97d4ba92b5f",
         english_only: false,
     },
     KnownModel {
@@ -66,6 +71,7 @@ const KNOWN_MODELS: &[KnownModel] = &[
         label: "Base (English)",
         blurb: "The sweet spot: solid captions at ~10x realtime.",
         approx_bytes: 147_400_000,
+        sha1: "137c40403d78fd54d454da0f9bd998f78703390c",
         english_only: true,
     },
     KnownModel {
@@ -73,6 +79,7 @@ const KNOWN_MODELS: &[KnownModel] = &[
         label: "Base (Multilingual)",
         blurb: "Solid captions, any language.",
         approx_bytes: 147_500_000,
+        sha1: "465707469ff3a37a2b9b8d8f89f2f99de7299dac",
         english_only: false,
     },
     KnownModel {
@@ -80,6 +87,7 @@ const KNOWN_MODELS: &[KnownModel] = &[
         label: "Small (English)",
         blurb: "Noticeably better wording; a few times slower.",
         approx_bytes: 487_600_000,
+        sha1: "db8a495a91d927739e50b3fc1cc4c6b8f6c2d022",
         english_only: true,
     },
     KnownModel {
@@ -87,6 +95,7 @@ const KNOWN_MODELS: &[KnownModel] = &[
         label: "Small (Multilingual)",
         blurb: "Best quality offered, any language.",
         approx_bytes: 487_600_000,
+        sha1: "55356645c2b361a969dfd0ef2c5a50d530afd8d5",
         english_only: false,
     },
 ];
@@ -97,6 +106,30 @@ fn known(id: &str) -> Option<&'static KnownModel> {
 
 fn model_url(id: &str) -> String {
     format!("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{id}.bin")
+}
+
+fn mirror_url(id: &str) -> String {
+    format!("https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-{id}.bin")
+}
+
+fn verify_model(path: &Path, id: &str) -> Result<(), String> {
+    let expected = known(id)
+        .ok_or_else(|| format!("unknown model {id:?}"))?
+        .sha1;
+    let mut file = std::fs::File::open(path).map_err(|error| error.to_string())?;
+    let mut hash = Sha1::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer).map_err(|error| error.to_string())?;
+        if read == 0 {
+            break;
+        }
+        hash.update(&buffer[..read]);
+    }
+    if format!("{:x}", hash.finalize()) != expected {
+        return Err(format!("Whisper model {id} failed its published checksum"));
+    }
+    Ok(())
 }
 
 /// Where downloaded models live: `<app data>/whisper-models/ggml-<id>.bin`.
@@ -176,6 +209,11 @@ struct LoadedModel {
     context: WhisperContext,
 }
 
+unsafe extern "C" fn abort_requested(data: *mut std::ffi::c_void) -> bool {
+    // The Arc<AtomicBool> in Transcriber::transcribe outlives state.full().
+    unsafe { (*(data as *const AtomicBool)).load(Ordering::Relaxed) }
+}
+
 /// The transcriber: the one transcription and the one model download that
 /// can run at a time, and the model kept loaded between runs.
 pub struct Transcriber {
@@ -236,18 +274,35 @@ impl Transcriber {
         let job = self.downloads.begin("model download")?;
         let destination = model_file(dirs, id)?;
         if destination.is_file() {
-            return Ok(());
+            return verify_model(&destination, id);
         }
         let estimate = known(id).map(|model| model.approx_bytes).unwrap_or(0);
         let partial = destination.with_extension("bin.part");
-        let (received, total) = crate::download_to(
+        let download = crate::download_to(
             &model_url(id),
             &partial,
             id,
             estimate,
             job.cancel_flag(),
             &mut progress,
-        )?;
+        );
+        let (received, total) = match download {
+            Ok(result) => result,
+            Err(error) if error != "download cancelled" => crate::download_to(
+                &mirror_url(id),
+                &partial,
+                id,
+                estimate,
+                job.cancel_flag(),
+                &mut progress,
+            )
+            .map_err(|fallback| format!("{error}; mirror download failed: {fallback}"))?,
+            Err(error) => return Err(error),
+        };
+        if let Err(error) = verify_model(&partial, id) {
+            let _ = std::fs::remove_file(&partial);
+            return Err(error);
+        }
         std::fs::rename(&partial, &destination)
             .map_err(|error| format!("could not finish {}: {error}", destination.display()))?;
         progress(DownloadProgress {
@@ -346,22 +401,23 @@ impl Transcriber {
         let mut state = context
             .create_state()
             .map_err(|error| format!("could not start whisper: {error}"))?;
-
         let threads = std::thread::available_parallelism()
             .map(|count| count.get().min(8))
             .unwrap_or(4);
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
         params.set_n_threads(threads as i32);
-        // The language is whisper's to hear: it detects it from the first
-        // window, and an English-only model ignores the setting anyway.
         params.set_language(Some("auto"));
         params.set_print_special(false);
         params.set_print_progress(false);
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
         params.set_suppress_blank(true);
-        let abort = Arc::clone(&cancel);
-        params.set_abort_callback_safe(move || abort.load(Ordering::Relaxed));
+        // whisper-rs 0.16's safe abort wrapper casts a boxed trait object as
+        // the concrete closure type, causing spurious native aborts.
+        unsafe {
+            params.set_abort_callback(Some(abort_requested));
+            params.set_abort_callback_user_data(Arc::as_ptr(&cancel) as *mut std::ffi::c_void);
+        }
         params.set_progress_callback_safe(progress);
 
         state
@@ -428,6 +484,15 @@ mod tests {
     }
 
     #[test]
+    fn native_abort_reads_the_live_cancel_flag() {
+        let flag = AtomicBool::new(false);
+        let data = &flag as *const AtomicBool as *mut std::ffi::c_void;
+        assert!(!unsafe { abort_requested(data) });
+        flag.store(true, Ordering::Relaxed);
+        assert!(unsafe { abort_requested(data) });
+    }
+
+    #[test]
     fn status_lists_every_model_undownloaded_in_an_empty_data_dir() {
         let scratch =
             std::env::temp_dir().join(format!("concat-whisper-test-{}", std::process::id()));
@@ -436,5 +501,47 @@ mod tests {
         assert_eq!(status.models.len(), KNOWN_MODELS.len());
         assert!(status.models.iter().all(|model| !model.downloaded));
         let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    #[test]
+    fn installed_model_transcribes_real_speech() {
+        let (Ok(root), Ok(audio), Ok(expected)) = (
+            std::env::var("SHARBCUT_ASR_TEST_ROOT"),
+            std::env::var("SHARBCUT_ASR_TEST_AUDIO"),
+            std::env::var("SHARBCUT_ASR_TEST_EXPECT"),
+        ) else {
+            return;
+        };
+        let segments = Transcriber::new()
+            .transcribe(
+                &AppDirs::under(std::path::Path::new(&root)),
+                &TranscribeRequest {
+                    path: audio,
+                    audio_stream: None,
+                    source_start: 0.0,
+                    window: 9.0,
+                    model_id: "tiny".to_owned(),
+                },
+                |_| {},
+            )
+            .expect("real speech transcribes");
+        let transcript = segments
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(transcript.contains(&expected), "transcript: {transcript}");
+    }
+
+    #[test]
+    fn downloads_and_checks_real_multilingual_model() {
+        let Ok(root) = std::env::var("SHARBCUT_ASR_TEST_DOWNLOAD_ROOT") else {
+            return;
+        };
+        let dirs = AppDirs::under(std::path::Path::new(&root));
+        Transcriber::new()
+            .download_model(&dirs, "tiny", |_| {})
+            .expect("verified model download");
+        assert!(Transcriber::status(&dirs).unwrap().models[1].downloaded);
     }
 }
