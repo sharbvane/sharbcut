@@ -184,11 +184,44 @@ impl Fonts {
             stretch: fontdb::Stretch::Normal,
             style: slant,
         };
-        let id = self
+        let mut id = self
             .db
             .query(&query)
             .or_else(|| self.db.faces().next().map(|face| face.id))
             .ok_or(Error::NoFont)?;
+        let covers_text = |id| {
+            self.db.with_face_data(id, |data, index| {
+                ttf_parser::Face::parse(data, index).is_ok_and(|face| {
+                    style
+                        .content
+                        .chars()
+                        .filter(|c| !c.is_whitespace())
+                        .all(|c| face.glyph_index(c).is_some())
+                })
+            }) == Some(true)
+        };
+        if !covers_text(id) {
+            for family in [
+                "Microsoft YaHei",
+                "Microsoft YaHei UI",
+                "Noto Sans CJK SC",
+                "SimHei",
+                "SimSun",
+            ] {
+                let fallback = fontdb::Query {
+                    families: &[fontdb::Family::Name(family)],
+                    ..query
+                };
+                if let Some(candidate) = self
+                    .db
+                    .query(&fallback)
+                    .filter(|&candidate| covers_text(candidate))
+                {
+                    id = candidate;
+                    break;
+                }
+            }
+        }
         // Copied out: the shaper and the outliner both want a slice that
         // outlives the database borrow, and a face is a few hundred KB.
         self.db
@@ -633,6 +666,18 @@ mod tests {
         assert!(out.block_width > 0 && out.block_height > 0);
         assert!(out.block_width < 640);
         assert!(opaque_pixels(&out.png) > 100);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn chinese_title_uses_a_face_with_chinese_glyphs() {
+        let fonts = Fonts::new();
+        let mut title = style("第一段视频");
+        title.font_family = "Helvetica Neue".to_owned();
+        let blob = fonts.pick(&title).expect("system font exists");
+        let index = u32::from_le_bytes(blob[..4].try_into().unwrap());
+        let face = ttf_parser::Face::parse(&blob[4..], index).unwrap();
+        assert!(title.content.chars().all(|c| face.glyph_index(c).is_some()));
     }
 
     /// Left-aligned words start at the anchor and run right; right-aligned
