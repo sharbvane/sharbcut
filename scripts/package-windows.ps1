@@ -90,7 +90,7 @@ if (-not $resolvedHeaders.StartsWith("$resolvedStage\", [StringComparison]::Ordi
 if (Test-Path -LiteralPath $resolvedHeaders) { Remove-Item -LiteralPath $resolvedHeaders -Recurse -Force }
 @('python311.zip', '.', 'Lib\site-packages', '..\bgm-montage\scripts', 'import site') |
     Set-Content -LiteralPath (Join-Path $pythonDir 'python311._pth') -Encoding ascii
-& $python -c 'import numpy, librosa, torch, transformers, cv2; print("Embedded Python runtime OK")'
+& $python -c 'import numpy, librosa, torch, transformers, cv2'
 if ($LASTEXITCODE -ne 0) { throw 'Embedded Python dependencies failed to import.' }
 & $python (Join-Path $bgmTarget 'scripts\bgm_montage.py') --version
 if ($LASTEXITCODE -ne 0) { throw 'Packaged BGM Montage could not start.' }
