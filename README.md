@@ -1,54 +1,54 @@
 # SharbCut
 
 <div align="center">
-  <img src="design-reference/sharbcut-logo.png" alt="SharbCut logo" width="112">
-  <p><strong>A Windows-first desktop video editor with an editable timeline, AI-assisted editing, and beat-synced montage.</strong></p>
+  <img src="design-reference/sharbcut-logo.png" alt="SharbCut 标志" width="112">
+  <p><strong>面向 Windows 的现代桌面视频剪辑器，提供可编辑时间线、AI 辅助剪辑和音乐节拍混剪。</strong></p>
 </div>
 
-SharbCut is an AGPL-licensed desktop editor developed from [Concat](https://github.com/jub0t/Concat). Manual edits, AI edits, and beat-synced montages all work on the same project timeline; generated cuts remain editable and can be undone or redone.
+SharbCut 基于 [Concat](https://github.com/jub0t/Concat) 开发。手动剪辑、AI 剪辑和节拍混剪使用同一条项目时间线；生成的剪辑仍可继续编辑，并支持撤销和重做。
 
-## Features
+## 功能
 
-- **Editable timeline:** multi-track clips, preview, transitions, effects, audio, titles, subtitles, and export.
-- **AI Agent:** describe edits in natural language. SharbCut validates the proposed timeline commands before applying them as an undoable edit.
-- **BGM montage:** create beat-synced edits from media already in the project and place source-backed clips directly on the timeline.
-- **BMTS-lite by default:** the fast mode is used for ordinary montage requests. Full BGM-Montage analysis remains available as an advanced option.
-- **Text and subtitles:** add and edit text clips without flattening them into a rendered video.
-- **Undo and redo:** continue editing manually after AI or montage operations.
-- **Windows packages:** installer and portable ZIP include the application runtime and media tools; end users do not need Rust, Cargo, CMake, or FFmpeg installed separately.
+- **可编辑时间线：** 多轨片段、预览、转场、特效、音频、标题、字幕和导出。
+- **AI Agent：** 用自然语言描述剪辑要求。SharbCut 会先校验 AI 提出的时间线操作，再将其作为可撤销的编辑应用。
+- **BGM 节拍混剪：** 使用项目中的媒体生成卡点剪辑，并将保留源素材关联的片段直接放入时间线。
+- **默认 BMTS-lite：** 日常卡点任务默认使用快速模式；完整 BGM-Montage 分析作为高级选项保留。
+- **文字与字幕：** 添加和编辑文字片段，无需将其烘焙进最终视频。
+- **撤销与重做：** 完成 AI 或混剪操作后，仍可继续手动编辑。
+- **Windows 安装包：** 安装版和便携 ZIP 均包含应用运行时与媒体工具，普通用户无需另行安装 Rust、Cargo、CMake 或 FFmpeg。
 
-## Preview
+## 预览
 
-The image is a saved UI concept from `design-reference`, not a screenshot of the current application build.
+下图是保存在 `design-reference` 中的 UI 概念图，并非当前应用构建版本的实际截图。
 
-![SharbCut dark UI concept](design-reference/UI概念图/91d41443-5ded-4046-a06e-1b7965d9a235.png)
+![SharbCut 深色 UI 概念图](design-reference/UI概念图/91d41443-5ded-4046-a06e-1b7965d9a235.png)
 
-## Download and install
+## 下载与安装
 
-The first public release is [v0.3.0](https://github.com/sharbvane/sharbcut/releases/tag/v0.3.0).
+首个公开版本为 [v0.3.0](https://github.com/sharbvane/sharbcut/releases/tag/v0.3.0)。
 
-- [Windows x64 installer — SharbCutSetup.exe](https://github.com/sharbvane/sharbcut/releases/download/v0.3.0/SharbCutSetup.exe): run the installer and launch SharbCut from the Start menu.
-- [Portable package — SharbCut-Windows-x64.zip](https://github.com/sharbvane/sharbcut/releases/download/v0.3.0/SharbCut-Windows-x64.zip): extract the archive and run `SharbCut.exe`. The `portable` directory stores local settings and downloaded models beside the application.
+- [Windows x64 安装版 — SharbCutSetup.exe](https://github.com/sharbvane/sharbcut/releases/download/v0.3.0/SharbCutSetup.exe)：运行安装程序，然后从开始菜单启动 SharbCut。
+- [便携版 — SharbCut-Windows-x64.zip](https://github.com/sharbvane/sharbcut/releases/download/v0.3.0/SharbCut-Windows-x64.zip)：解压后运行 `SharbCut.exe`。`portable` 目录会在应用旁保存本地设置和下载的模型。
 
-Both packages are intended for Windows x64. Release notes include SHA-256 checksums. Projects reference source media at its existing location; moving or deleting those files can make timeline clips unavailable.
+两个发行包均面向 Windows x64。SHA-256 校验值见 Release 说明。项目会引用原位置的源媒体文件；移动或删除这些文件可能导致时间线中的素材无法使用。
 
-## Configure AI editing
+## 配置 AI 剪辑
 
-Open **AI Editing** in SharbCut and enter an OpenAI Chat Completions-compatible endpoint, API key, and model. For example:
+在 SharbCut 中打开 **AI 剪辑**，填写兼容 OpenAI Chat Completions 的接口地址、API Key 和模型。例如：
 
 ```text
 Base URL: https://api.example.com/v1
-Model: your-model-name
-API key: enter your own key in the application
+模型: 由你选择的模型名称
+API Key: 在应用中填写你自己的密钥
 ```
 
-Use HTTPS for remote providers. Local HTTP is accepted for `localhost` and `127.0.0.1`. The API key is stored in Windows Credential Manager and is not written to the project file. Reasoning effort is optional and depends on the provider.
+远程服务请使用 HTTPS。本地 HTTP 仅允许用于 `localhost` 和 `127.0.0.1`。API Key 保存在 Windows 凭据管理器中，不会写入项目文件。推理强度为可选项，具体取决于服务提供方。
 
-When AI editing is requested, SharbCut can send project and timeline metadata, media names and paths, up to four low-resolution preview frames, and—when available for selected media—an audio summary or short transcript to the configured endpoint. Review that provider's privacy terms before sending private footage or project data. Normal local editing and BGM montage do not require an AI service.
+执行 AI 剪辑时，SharbCut 可能会向你配置的接口发送项目和时间线元数据、媒体名称与路径、最多四张低分辨率预览帧，以及（若所选素材已有相关信息）音频摘要或简短转录文本。发送私人素材或项目数据前，请先查看服务提供方的隐私条款。普通本地剪辑和 BGM 混剪无需连接 AI 服务。
 
-## Development
+## 开发
 
-Development targets Windows x64 with the MSVC toolchain and Windows SDK. The setup script keeps project-manageable tools and caches in ignored `.tools` / `vendor` directories; Visual Studio Build Tools and the Windows SDK are installed normally.
+开发目标为 Windows x64，使用 MSVC 工具链和 Windows SDK。项目级工具和缓存由初始化脚本放在 Git 忽略的 `.tools` / `vendor` 目录中；Visual Studio Build Tools 与 Windows SDK 按常规方式安装。
 
 ```powershell
 .\scripts\setup-dev.ps1
@@ -59,22 +59,22 @@ Pop-Location
 .\scripts\run-dev.ps1 -SkipBuild
 ```
 
-Create the Windows installer and portable ZIP with:
+使用以下命令创建 Windows 安装包和便携 ZIP：
 
 ```powershell
 .\scripts\package-windows.ps1
 ```
 
-Daily montage testing should use BMTS-lite and a small set of real media. Run full BGM-Montage analysis only when testing its algorithm, full-mode compatibility, or a release regression.
+日常混剪测试建议使用 BMTS-lite 和少量真实素材。仅在测试核心算法、完整模式兼容性或发布回归时运行完整 BGM-Montage 分析。
 
-## Project status
+## 项目状态
 
-SharbCut is under active development. This is the first public Windows x64 release; the project is not yet declaring cross-platform release support. Issues and focused contributions are welcome.
+SharbCut 正在积极开发中。目前首个公开发行版面向 Windows x64，尚未声明支持其他平台的正式发行。欢迎提交 Issue 和有针对性的贡献。
 
-## License and credits
+## 许可证与致谢
 
-SharbCut's Concat-derived source is licensed under **AGPL-3.0-or-later**. The original Concat license exceptions, contribution terms, and trademark notices remain in the repository; see [LICENSE](LICENSE), [LICENSE-EXCEPTIONS.md](LICENSE-EXCEPTIONS.md), [CLA.md](CLA.md), and [TRADEMARK.md](TRADEMARK.md).
+SharbCut 中源自 Concat 的代码采用 **AGPL-3.0-or-later** 许可证。原 Concat 项目的许可证例外、贡献条款和商标声明仍然有效，详见 [LICENSE](LICENSE)、[LICENSE-EXCEPTIONS.md](LICENSE-EXCEPTIONS.md)、[CLA.md](CLA.md) 和 [TRADEMARK.md](TRADEMARK.md)。
 
-BGM-Montage and BMTS-lite are separate projects with their own source-available, non-commercial licenses. They are not relicensed by this repository or covered by its root `LICENSE`. Their licenses and the compatibility patch attribution are documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The official SharbCut distribution is published with the component copyright holder's authorization; that does not grant general commercial-use rights to downstream users.
+BGM-Montage 与 BMTS-lite 是独立项目，分别采用其自身的源代码可见、非商业用途许可证。本仓库及根目录 `LICENSE` 不会改变或取代这些许可证。相关许可证及兼容性补丁的归属信息见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。SharbCut 官方发行版已获得组件版权方授权发布；这不代表下游用户获得了一般商业使用权。
 
-Other bundled or linked third-party components—including FFmpeg, Slint, Rust crates, fonts, and speech / vision libraries—are credited with their applicable terms in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Keep the included notices with redistributed builds.
+FFmpeg、Slint、Rust crates、字体以及语音 / 视觉库等其他随附或引用的第三方组件，其适用条款均列于 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。再分发构建产物时请保留随附的声明文件。
