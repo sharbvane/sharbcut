@@ -4,7 +4,7 @@
 [Setup]
 AppId=SharbCut
 AppName=SharbCut
-AppVersion=0.2.1
+AppVersion=0.3.0
 AppPublisher=SharbCut
 AppPublisherURL=https://github.com/sharbvane/sharbcut
 DefaultDirName={localappdata}\Programs\SharbCut

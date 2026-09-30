@@ -15,7 +15,9 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $toolsRoot = Join-Path $repoRoot '.tools'
 $vendorRoot = Join-Path $repoRoot 'vendor'
 $downloadsRoot = Join-Path $toolsRoot 'downloads'
+$env:ORT_CACHE_DIR = Join-Path $toolsRoot 'ort-cache'
 New-Item -ItemType Directory -Force -Path $toolsRoot, $vendorRoot, $downloadsRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $env:ORT_CACHE_DIR | Out-Null
 
 function Get-Download([string]$Uri, [string]$Path) {
     if ((Test-Path -LiteralPath $Path) -and (Get-Item -LiteralPath $Path).Length -eq 0) {

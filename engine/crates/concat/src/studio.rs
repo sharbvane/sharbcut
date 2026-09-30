@@ -282,6 +282,7 @@ pub struct AgentState {
     pub open: bool,
     pub busy: bool,
     pub transcript: String,
+    pub history: Vec<(bool, String)>,
     pub prompt: String,
     pub base_url: String,
     pub model: String,
@@ -1334,6 +1335,7 @@ impl Studio {
             open: false,
             busy: false,
             transcript: String::new(),
+            history: Vec::new(),
             prompt: String::new(),
             base_url: prefs
                 .ai_base_url
@@ -2360,6 +2362,8 @@ impl Studio {
         if prompt.is_empty() {
             return;
         }
+        let history = self.agent.history.clone();
+        let turn_prompt = prompt.clone();
         let context_prompt = format!(
             "{prompt}\nSelected clips: {:?}; playhead: {:.3} seconds",
             self.selection, self.playhead
@@ -2422,18 +2426,28 @@ impl Studio {
                     &project,
                     &selected,
                     transcript.as_deref(),
+                    &history,
                 )
             },
             move |studio, _, _, result| {
                 studio.agent.busy = false;
                 match result {
                     Ok(plan) => {
+                        if studio
+                            .session
+                            .as_ref()
+                            .is_none_or(|session| session.path() != path)
+                        {
+                            if studio.session.is_some() {
+                                studio
+                                    .agent
+                                    .transcript
+                                    .push_str("系统：项目已变化，未应用本次 AI 修改。\n\n");
+                            }
+                            return;
+                        }
                         if (plan.command.is_some() || plan.montage.is_some())
-                            && (studio.revision != revision
-                                || studio
-                                    .session
-                                    .as_ref()
-                                    .is_none_or(|session| session.path() != path))
+                            && studio.revision != revision
                         {
                             studio
                                 .agent
@@ -2465,6 +2479,13 @@ impl Studio {
                                 false,
                                 montage.duration,
                             );
+                        }
+                        studio
+                            .agent
+                            .history
+                            .extend([(false, turn_prompt), (true, plan.reply.clone())]);
+                        while studio.agent.history.len() > 12 {
+                            studio.agent.history.remove(0);
                         }
                         studio
                             .agent
@@ -5032,6 +5053,8 @@ impl Studio {
                 }
                 self.pause();
                 self.session = Some(session);
+                self.agent.transcript.clear();
+                self.agent.history.clear();
                 self.echo = None;
                 self.dirty = false;
                 self.project_name = info.name.clone();
@@ -5128,6 +5151,8 @@ impl Studio {
         }
         self.autosave.stop();
         self.session = None;
+        self.agent.transcript.clear();
+        self.agent.history.clear();
         self.echo = None;
         self.dirty = false;
         self.selection.clear();

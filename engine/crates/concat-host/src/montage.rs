@@ -434,8 +434,7 @@ fn transition_before(shots: &[Shot], index: usize) -> Option<Transition> {
         duration: requested
             .min(previous.duration * 0.22)
             .min(current.duration * 0.22)
-            .min(0.30)
-            .max(0.06),
+            .clamp(0.06, 0.30),
     })
 }
 
@@ -731,8 +730,12 @@ mod tests {
                 PathBuf::new()
             },
             sources,
-            theme: "Iceland cinematic landscape".to_owned(),
-            duration: 5.0,
+            theme: std::env::var("SHARBCUT_MONTAGE_TEST_THEME")
+                .unwrap_or_else(|_| "Iceland cinematic landscape".to_owned()),
+            duration: std::env::var("SHARBCUT_MONTAGE_TEST_DURATION")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(5.0),
             ratio: "1920x1080".to_owned(),
         })
         .expect("montage generates a plan");

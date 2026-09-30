@@ -1,0 +1,47 @@
+diff --git a/scripts/validate_output.py b/scripts/validate_output.py
+index c0d7735..ad5d25b 100644
+--- a/scripts/validate_output.py
++++ b/scripts/validate_output.py
+@@ -18,0 +19 @@ from montage import adjacent_diversity_issues, canonical_source_key, parse_ratio
++from music_event_contract import normalize_music_event_contract
+@@ -475,12 +476,4 @@ def _cut_alignment(
+-    groups = _collect_event_times(audiomap, duration)
+-    rhythm = audiomap.get("rhythm_mode", {})
+-    mode = str(rhythm.get("mode") if isinstance(rhythm, dict) else rhythm or "phrase_flow")
+-    if mode == "beat_cut":
+-        allowed = sorted(set(groups["beats"] + groups["downbeats"] + groups["accents"] + groups["drops"] + groups["surges"] + groups["climaxes"] + groups["hard_stops"]))
+-        beat_period = 0.0
+-        tempo = audiomap.get("tempo", {}) if isinstance(audiomap.get("tempo"), dict) else {}
+-        beat_period = float(tempo.get("beat_period_seconds") or 0.0)
+-        tolerance = max(0.10, min(0.28, beat_period * 0.32 if beat_period else 0.20))
+-    else:
+-        allowed = sorted(set(groups["phrases"] + groups["sections"] + groups["drops"] + groups["surges"] + groups["climaxes"] + groups["hard_stops"]))
+-        tolerance = 0.55
++    contract = normalize_music_event_contract(audiomap, duration)
++    mode = contract["mode"]
++    allowed = contract["allowed_times"]
++    tolerance = contract["tolerance_seconds"]
+@@ -498 +491 @@ def _cut_alignment(
+-    required_share = 0.70 if mode == "beat_cut" else 0.60
++    required_share = contract["required_aligned_share"]
+diff --git a/tests/test_timeline_render_qa.py b/tests/test_timeline_render_qa.py
+index 854b039..8a34822 100644
+--- a/tests/test_timeline_render_qa.py
++++ b/tests/test_timeline_render_qa.py
+@@ -95,0 +96,16 @@ def test_cut_alignment_accepts_strong_energy_events(mode: str) -> None:
++def test_beat_cut_alignment_accepts_planned_onset_boundaries() -> None:
++    shots = [{"output_end": 1.0}, {"output_end": 2.0}, {"output_end": 3.0}]
++    audiomap = {
++        "rhythm_mode": {"mode": "beat_cut"},
++        "tempo": {"beat_period_seconds": 0.4},
++        "events": {"beats": [0.7, 1.7], "onsets": [1.0, 2.0]},
++    }
++
++    metrics = _cut_alignment(shots, audiomap, 3.0)
++
++    assert metrics is not None
++    assert metrics["passed"] is True
++    assert metrics["aligned_share"] == pytest.approx(1.0)
++    assert [item["nearest_event"] for item in metrics["boundaries"]] == [1.0, 2.0]
++
++

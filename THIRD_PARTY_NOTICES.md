@@ -1,5 +1,32 @@
 # Third-party notices
 
+## Concat
+
+SharbCut continues development of [Concat](https://github.com/jub0t/Concat) and
+retains its upstream history and `upstream` Git remote. Concat-derived source
+and modifications remain under AGPL-3.0-or-later. Preserve the original
+[`LICENSE-EXCEPTIONS.md`](LICENSE-EXCEPTIONS.md), [`CLA.md`](CLA.md), and
+[`TRADEMARK.md`](TRADEMARK.md) notices; they are not replaced by this file.
+
+## BGM-Montage and BMTS-lite
+
+The Windows setup and packaging scripts fetch
+[BGM-Montage v1.4.6](https://github.com/sharbvane/bgm-montage/tree/v1.4.6)
+(commit `ff89f181645e4ebf952e2eb1ed99efad0e23d2e7`) and
+[BMTS-lite](https://github.com/sharbvane/BMTS-Lite) (commit
+`883b3c05b35a8974bb8a1b0dde61e521535f0b15`) into the ignored `vendor/`
+directory. Both carry their own source-available, non-commercial license and
+license notice. Those original files ship with the official Windows package;
+neither project is relicensed under SharbCut's root AGPL license. The official
+SharbCut distribution is authorized by the component copyright holder. That
+authorization does not itself grant general downstream commercial-use rights.
+
+[`patches/bgm-montage-music-event-contract.patch`](patches/bgm-montage-music-event-contract.patch)
+is a compatibility change against the pinned BGM-Montage source and is kept
+separate from Concat-derived code. Its use and redistribution follow the
+BGM-Montage license; the original BGM-Montage `LICENSE` and `LICENSE-NOTICE.md`
+are retained in the packaged runtime.
+
 ## FFmpeg
 
 The Concat editing engine links FFmpeg's libraries - libavformat, libavcodec,

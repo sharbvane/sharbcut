@@ -10,6 +10,10 @@ target/
 # Project-local toolchains and caches.
 /.tools/
 /release/
+/.cache/
+**/.cache/
+/logs/
+*.log
 
 # Nix build output
 /result
@@ -50,7 +54,8 @@ desktop.ini
 
 # Local environment
 .env
-.env.local
+.env.*
+!.env.example
 
 # An FFmpeg development build unpacked locally for the linked engine
 # (headers + import libraries), pointed at with FFMPEG_DIR. Large and

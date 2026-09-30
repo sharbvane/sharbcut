@@ -25,6 +25,14 @@ $actual = & git -C $source rev-parse HEAD
 if ($LASTEXITCODE -ne 0 -or $actual.Trim() -ne $commit) {
     throw "BGM Montage must be pinned to v1.4.6 ($commit); found $actual"
 }
+$sourcePatch = Join-Path $repoRoot 'patches\bgm-montage-music-event-contract.patch'
+& git -C $source apply --unidiff-zero --reverse --check $sourcePatch *> $null
+if ($LASTEXITCODE -ne 0) {
+    & git -C $source apply --unidiff-zero --check $sourcePatch
+    if ($LASTEXITCODE -ne 0) { throw 'BGM Montage compatibility patch does not apply to the pinned source.' }
+    & git -C $source apply --unidiff-zero $sourcePatch
+    if ($LASTEXITCODE -ne 0) { throw 'Could not apply the BGM Montage music-event compatibility patch.' }
+}
 
 $liteCommit = '883b3c05b35a8974bb8a1b0dde61e521535f0b15'
 if (-not (Test-Path -LiteralPath (Join-Path $liteSource 'worker.py'))) {
